@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prompt Spider</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f5f3ee;--panel:#fffefa;--line:#dedbd2;--tx:#27332f;--mut:#758078;--code:#527b67;--model:#b5744d;--you:#b88a38;--pink:#a75b4c}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--tx);font:12px/1.55 'JetBrains Mono',ui-monospace,Menlo,monospace}
+.wrap{max-width:1100px;margin:0 auto;padding:12px}
+header{display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:8px}
+h1{font-size:1.5rem;font-weight:800}h1 b{color:var(--pink)}
+#top{display:flex;gap:16px}#top div{text-align:right;color:var(--mut)}#top strong{display:block;font-size:1.3rem;color:var(--tx)}
+.sub{color:var(--mut);margin:2px 0 10px}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+button{font:inherit;color:var(--tx);background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:8px 12px;min-height:40px;cursor:pointer}
+button:hover{border-color:var(--mut)}button:disabled{opacity:.5}
+:focus-visible{outline:2px solid var(--pink);outline-offset:2px}
+#msg{color:var(--mut)}
+details{margin-bottom:8px}summary{cursor:pointer;color:var(--mut)}
+textarea{width:100%;height:110px;margin:6px 0;background:var(--panel);color:var(--tx);border:1px solid var(--line);border-radius:4px;padding:8px;font:inherit}
+#stage{position:relative;display:grid;grid-template-columns:50% 1fr 150px;height:460px;background:#eceae3;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+#cv{position:absolute;inset:0;width:100%;height:100%}
+#srcwrap{position:relative;z-index:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+.tb{display:flex;align-items:center;gap:6px;padding:8px 12px;border-bottom:1px solid var(--line);color:var(--mut);background:rgba(255,254,250,.92)}
+.tb i{width:9px;height:9px;border-radius:50%;background:#ff5f56}.tb i:nth-child(2){background:#ffbd2e}.tb i:nth-child(3){background:#27c93f}.tb em{margin-left:auto;font-style:normal}
+#src{flex:1;min-height:0;-webkit-mask-image:linear-gradient(transparent,#000 10%,#000 90%,transparent);mask-image:linear-gradient(transparent,#000 10%,#000 90%,transparent);position:relative;z-index:1;overflow:hidden;padding:12px;white-space:pre-wrap;word-break:break-word;line-height:1.9;color:#68736d}
+.w{padding:1px 2px;border-radius:2px;transition:background .15s}
+.w.code{background:rgba(82,123,103,.16);color:#355b46}.w.model{background:rgba(181,116,77,.16);color:#805037}.w.you{background:rgba(184,138,56,.17);color:#785d26}
+.w.cur{outline:1px solid var(--pink);background:rgba(167,91,76,.17);color:#713b31}
+#cards{position:relative;z-index:1;display:grid;grid-template-rows:repeat(3,1fr);gap:10px;padding:10px}
+.card{border:1px solid;border-radius:4px;background:rgba(255,254,250,.94);padding:8px 10px;display:flex;flex-direction:column;justify-content:space-between}
+.card small{color:var(--mut)}.card b{font-size:2rem;line-height:1}
+#c-code{border-color:var(--code)}#c-code b,#c-code span{color:var(--code)}
+#c-model{border-color:var(--model)}#c-model b,#c-model span{color:var(--model)}
+#c-you{border-color:var(--you)}#c-you b,#c-you span{color:var(--you)}
+.grid{display:grid;gap:10px;margin-top:10px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px;min-width:0}
+.panel h2{font-size:.72rem;font-weight:400;color:var(--mut);margin-bottom:6px}
+.wide{grid-column:span 2}@media(max-width:640px){.wide{grid-column:auto}#stage{grid-template-columns:62% 1fr 96px}.card b{font-size:1.4rem}}
+.row{display:grid;grid-template-columns:52px 96px 1fr 50px 64px;gap:6px;align-items:center;white-space:nowrap;overflow:hidden}
+.chip{background:var(--pink);color:#fff;border-radius:2px;padding:0 5px;overflow:hidden;text-overflow:ellipsis;display:inline-block;max-width:96px}
+.code{color:var(--code)}.model{color:var(--model)}.you{color:var(--you)}
+.big{font-size:3rem;font-weight:800;color:var(--pink);line-height:1.1}
+.bars div{display:grid;grid-template-columns:70px 1fr 36px;gap:8px;align-items:center}
+.bars i{display:block;height:6px;background:currentColor;border-radius:3px;width:0;transition:width .2s}
+#dots{display:flex;flex-wrap:wrap;gap:3px}#dots span{width:7px;height:7px;border-radius:50%;background:#222c34}
+svg{width:100%;height:70px;display:block}
+.note{color:var(--mut);margin-top:12px;font-size:.78rem}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+.live{margin:12px 0 16px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.live-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.live-head h2{font-size:1rem}.live-head small{color:var(--mut)}
+.live-head select{color:var(--tx);background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:7px}
+.live-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:8px;margin-bottom:10px}
+.live-stat{padding:9px 11px;border:1px solid var(--line);border-radius:6px;background:var(--panel)}
+.live-stat small{display:block;color:var(--mut);font-size:.68rem;text-transform:uppercase}.live-stat strong{display:block;margin-top:3px;font-size:1.2rem}
+.live-stat.fail strong{color:#a95048}.live-stat.ok strong{color:var(--code)}
+.live-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.live-panel{min-width:0;border:1px solid var(--line);border-radius:6px;background:var(--panel);overflow:hidden}
+.live-panel h3{padding:8px 10px;border-bottom:1px solid var(--line);font-size:.78rem;font-weight:600}
+.live-scroll{max-height:240px;overflow:auto}
+.live-table{width:100%;border-collapse:collapse;white-space:nowrap;font-size:.7rem}
+.live-table th,.live-table td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left}
+.live-table th{position:sticky;top:0;background:var(--panel);color:var(--mut);z-index:1}
+.live-table tr:last-child td{border-bottom:0}.live-table .bad{color:#a95048}.live-table .good{color:var(--code)}
+.live-chat{padding:8px 10px;border-bottom:1px solid var(--line);white-space:pre-wrap;overflow-wrap:anywhere;max-height:230px;overflow:auto}
+.live-chat:last-child{border:0}.live-chat summary{font-size:.75rem;color:var(--tx)}.live-chat p{margin:7px 0;color:var(--mut)}
+.live-empty{padding:10px;color:var(--mut)}
+/* Restrained editorial palette: keep the live trace while removing terminal styling. */
+body{background:var(--bg)}
+.wrap{max-width:1260px;animation:spiderBoot .8s cubic-bezier(.16,1,.3,1) both}
+header{position:relative;padding:5px 0 9px;border-bottom:1px solid var(--line)}
+h1{letter-spacing:.015em;text-shadow:none}
+h1 b{color:var(--code);animation:none}
+#stage{height:min(58vh,590px);min-height:400px;border-color:var(--line);box-shadow:0 8px 24px rgba(49,55,44,.07)}
+#stage::after{display:none}
+#srcwrap,.card,.panel,.live-panel{backdrop-filter:none}
+.card{position:relative;overflow:hidden;animation:statRise .6s cubic-bezier(.16,1,.3,1) both;transition:transform .25s,box-shadow .25s}
+.card:hover{transform:translateY(-2px);box-shadow:0 5px 14px rgba(49,55,44,.09)}
+.card::after{display:none}
+#c-code,#c-model,#c-you{box-shadow:none}
+.live{position:relative;overflow:hidden;border-color:var(--line);box-shadow:0 5px 20px rgba(49,55,44,.06)}
+.live::before{display:none}
+.live-stat,.live-panel{transition:border-color .2s,box-shadow .2s}
+.live-stat:hover,.live-panel:hover{border-color:#c5c2b8;box-shadow:0 4px 12px rgba(49,55,44,.07)}
+.live-stat strong{font-variant-numeric:tabular-nums;text-shadow:none}
+.live-stat.ok strong,.live-stat.fail strong{animation:none}
+.live-table tr{transition:background .15s}.live-table tbody tr:hover{background:rgba(82,123,103,.07)}
+button{transition:transform .15s,border-color .2s,background .2s}button:hover{transform:translateY(-1px)}
+@keyframes spiderBoot{from{opacity:0;filter:blur(5px);transform:translateY(12px)}to{opacity:1;filter:blur(0);transform:none}}
+@keyframes signalFlicker{0%,94%,100%{opacity:1}95%{opacity:.45}96%{opacity:.9}97%{opacity:.55}}
+@keyframes scanFlicker{0%,100%{opacity:.35}50%{opacity:.8}}
+@keyframes statRise{from{opacity:0;transform:translateY(12px) scale(.98)}to{opacity:1;transform:none}}
+@keyframes dataSweep{0%,15%{left:-35%;opacity:0}35%,65%{opacity:1}85%,100%{left:110%;opacity:0}}
+@keyframes greenPulse{0%,100%{text-shadow:0 0 8px rgba(61,220,132,.12)}50%{text-shadow:0 0 20px rgba(61,220,132,.5)}}
+@keyframes redPulse{0%,100%{text-shadow:0 0 6px rgba(255,100,112,.12)}50%{text-shadow:0 0 17px rgba(255,100,112,.55)}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+@media(max-width:720px){.live-grid{grid-template-columns:1fr}}
+/* Stage first and nearly viewport-height; verified API facts live after it. */
+header{align-items:center;padding:7px 0 11px}
+header .sub{margin:3px 0 0;max-width:480px}
+#top{gap:clamp(7px,1.5vw,18px)}#top div{font-size:.68rem}#top strong{font-size:1.12rem;color:var(--tx)}
+.bar{margin:6px 0 10px;padding:7px 9px;border:1px solid var(--line);border-radius:9px;background:var(--panel)}
+#stage{height:max(480px,calc(100vh - 245px));min-height:480px;grid-template-columns:minmax(0,46%) minmax(0,1fr) 225px;border-radius:12px;background:#eceae3}
+#src{padding:clamp(13px,2vw,23px);font-size:clamp(13px,1.15vw,16px);line-height:2.1}
+#cards{gap:12px;padding:13px}
+.card{padding:12px 13px;border-radius:9px}
+.card span{font-size:.73rem;font-weight:800;letter-spacing:.05em}
+.card b{font-size:clamp(2.1rem,4vw,3.2rem)}
+.session-brief{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(260px,1fr);gap:18px;align-items:center;margin:14px 0;padding:18px 20px;border:1px solid var(--line);border-radius:12px;background:var(--panel);box-shadow:0 5px 18px rgba(49,55,44,.05)}
+.brief-kicker{color:var(--code);font-size:.65rem;font-weight:800;letter-spacing:.16em}
+.session-brief h2{margin:4px 0;font-size:1rem;line-height:1.4}
+.session-brief p,.data-caption{margin-top:4px;color:var(--mut);font-size:.72rem;line-height:1.6}
+.session-facts{display:flex;flex-wrap:wrap;gap:6px}
+.session-facts span{padding:5px 8px;border:1px solid var(--line);border-radius:5px;background:#f8f7f2;color:var(--tx);font-size:.67rem}
+.manual-input{margin:14px 0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.manual-input summary{font-size:.75rem}
+.live{margin-top:34px;padding:16px;border-radius:12px;background:var(--panel)}
+.live-head{align-items:flex-start}.live-head h2{margin:4px 0;font-size:1.05rem}.data-caption{max-width:720px}
+.live-stats{grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}
+.snapshot-summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:5px 10px;margin:10px 0 12px;padding:11px 13px;border-left:3px solid var(--code);border-radius:4px;background:#f2f1eb}
+.snapshot-summary b{color:var(--code);font-size:.72rem;letter-spacing:.04em}.snapshot-summary span{color:var(--tx);font-size:.72rem;line-height:1.7}.snapshot-summary small{color:var(--mut);font-size:.63rem}
+.live-stat{min-height:78px;border-radius:9px}.live-stat small{font-size:.63rem;letter-spacing:.02em}.live-stat strong{font-size:1.12rem}
+.live-panel{border-radius:9px}.live-panel h3{font-size:.72rem;color:var(--tx)}
+.live-table{font-size:.67rem}.live-table th{color:var(--mut)}.live-table td{color:var(--tx)}
+.note{padding:10px 12px;border-left:2px solid var(--code);background:#f0efe9;line-height:1.7}
+@media(max-width:760px){header{align-items:flex-start;flex-direction:column}#top{width:100%;justify-content:space-between;gap:4px}#top div{font-size:.58rem}#top strong{font-size:.95rem}#stage{height:max(480px,calc(100vh - 290px));grid-template-columns:minmax(0,60%) minmax(0,1fr) 112px}.card{padding:9px}.card b{font-size:1.75rem}.card small{font-size:.62rem}.session-brief{grid-template-columns:1fr}.live-head{flex-direction:column}}
+@media(max-width:460px){#stage{grid-template-columns:minmax(0,58%) minmax(0,1fr) 88px}.tb{padding:5px}.card b{font-size:1.45rem}.card span{font-size:.6rem}.card small{font-size:.55rem}#src{padding:9px;font-size:12px}.live{padding:9px}.live-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div><h1>PROMPT SPIDER <b>// live trace</b></h1><p class="sub">Luồng chữ đang được quét · nguồn và số liệu API thật nằm trong phần dữ liệu bên dưới.</p></div>
+    <div id="top"><div>từ trong luồng<strong id="n-all">0</strong></div><div>đã quét<strong id="n-read">0</strong></div><div>theo luật<strong id="n-code" style="color:var(--code)">0</strong></div><div>cần ngữ cảnh<strong id="n-model" style="color:var(--model)">0</strong></div><div>cần xem xét<strong id="n-you" style="color:var(--you)">0</strong></div></div>
+  </header>
+  <div class="bar">
+    <button id="replay">Chạy lại luồng</button><button id="pause">Tạm dừng</button><label>tốc độ mô phỏng <input id="spd" type="range" min="30" max="400" value="390" aria-label="Tốc độ mô phỏng"></label><span id="msg"></span>
+  </div>
+
+  <div id="stage">
+    <canvas id="cv"></canvas>
+    <div id="srcwrap"><div class="tb"><i></i><i></i><i></i><span>studio.prompt</span><em id="ln">ln 1</em></div><div id="src" aria-label="Văn bản đang được đọc"></div></div><div></div>
+    <div id="cards">
+      <div class="card" id="c-code"><span>→ THEO LUẬT</span><b>0</b><small>Heuristic demo · không phản ánh API route</small></div>
+      <div class="card" id="c-model"><span>→ CẦN NGỮ CẢNH</span><b>0</b><small>Phân loại minh họa · không gọi thêm model</small></div>
+      <div class="card" id="c-you"><span>→ CẦN XEM XÉT</span><b>0</b><small>Khớp danh sách từ khóa rủi ro minh họa</small></div>
+    </div>
+  </div>
+
+  <section id="session-brief" class="session-brief" aria-live="polite">
+    <div><span class="brief-kicker">TÓM TẮT LUỒNG HIỆN TẠI</span><h2 id="session-summary">Đang chờ request FreeLLMAPI mới…</h2><p id="session-detail">Phân loại màu trong Spider là heuristic minh họa theo từ, không phải hành động thật của model hay API.</p></div>
+    <div id="session-facts" class="session-facts"><span>Nguồn: đang chờ dữ liệu</span></div>
+  </section>
+
+  <details class="manual-input"><summary>Chạy thử với nội dung tự nhập</summary><textarea id="ta" aria-label="Nội dung cần phân tích"></textarea><button id="go">Phân tích nội dung</button></details>
+
+  <div class="grid">
+    <div class="panel wide"><h2>Diễn tiến phân loại minh họa · thời gian · từ · câu hỏi · mức tin cậy · nhóm</h2><div id="stream"></div></div>
+    <div class="panel"><h2>Tỷ lệ từ khớp quy tắc demo</h2><div class="big" id="pct">0%</div><div style="color:var(--mut)">không phải tỷ lệ thành công hay routing API</div>
+      <div class="bars" style="margin-top:8px"><div class="code">theo luật<span><i id="b-code"></i></span><em id="t-code" style="font-style:normal">0</em></div><div class="model">cần ngữ cảnh<span><i id="b-model"></i></span><em id="t-model" style="font-style:normal">0</em></div><div class="you">xem xét<span><i id="b-you"></i></span><em id="t-you" style="font-style:normal">0</em></div></div></div>
+    <div class="panel"><h2>Mức tin cậy do heuristic tự gán · 40 từ gần nhất</h2><svg id="spark" viewBox="0 0 300 70" preserveAspectRatio="none"></svg><div id="avg" style="color:var(--mut)">Chưa có từ nào được quét</div></div>
+    <div class="panel"><h2>Số từ đã quét · một chấm tương ứng một từ</h2><div id="dots"></div></div>
+    <div class="panel"><h2>Phân bố phân loại minh họa</h2><div id="who"></div></div>
+  </div>
+  <section class="live" aria-label="Số liệu request thật từ FreeLLMAPI">
+    <div class="live-head"><div><span class="brief-kicker">DỮ LIỆU THỰC ĐO</span><h2>FreeLLMAPI · request, model và độ trễ</h2><small id="sync-state">Chưa kết nối · chạy freellmapi_spider_bridge.py</small><p class="data-caption">Các số liệu bên dưới được đọc từ bridge cục bộ. Request API thường chỉ có metadata; nội dung hội thoại Playground được lưu riêng trên máy này.</p></div>
+      <label>Khoảng thời gian <select id="analytics-range"><option value="24h">24 giờ</option><option value="7d" selected>7 ngày</option><option value="30d">30 ngày</option><option value="90d">90 ngày</option></select></label></div>
+    <div id="snapshot-summary" class="snapshot-summary"><b>Tóm tắt theo số liệu</b><span>Đang đọc snapshot từ bridge cục bộ…</span></div>
+    <div id="live-stats" class="live-stats"></div>
+    <div class="live-grid">
+      <section class="live-panel"><h3>Request mới nhất · trạng thái, token và độ trễ</h3><div class="live-scroll" id="recent-calls"></div></section>
+      <section class="live-panel"><h3>Tổng hợp theo nhà cung cấp</h3><div class="live-scroll" id="provider-breakdown"></div></section>
+      <section class="live-panel"><h3>Tổng hợp theo model</h3><div class="live-scroll" id="model-breakdown"></div></section>
+      <section class="live-panel"><h3>Lỗi theo nhóm và nhà cung cấp</h3><div class="live-scroll" id="error-breakdown"></div></section>
+      <section class="live-panel" style="grid-column:1/-1"><h3>Hội thoại Playground đã lưu · nội dung lưu cục bộ</h3><div class="live-scroll" id="recent-chats"></div></section>
+    </div>
+  </section>
+  <p class="note">Số từ, màu và đường đi trên Spider là hoạt ảnh phân tích heuristic của đoạn văn bản nhận được, không phải log quyết định nội bộ của model. Snapshot, tỷ lệ thành công, lỗi, token, attempts và latency lấy trực tiếp từ dữ liệu FreeLLMAPI bridge trong khoảng thời gian đã chọn.</p>
+</div>
+
+<script>
+'use strict';
+const THRESH = 0.95; let STEP = 90;
+const COL = { code: '#527b67', model: '#b5744d', you: '#b88a38' };
+const STOP = new Set(('và của là có các những một cho được trong với để không này khi từ đến cũng đã sẽ đang như nhưng hay hoặc về ra vào ' +
+  'the a an of to in and or for is are be on with as by at that this it from you your we they will can should must not do does if then than so every each any').split(' '));
+const RISK = new Set(['publish', 'publishing', 'buy', 'purchase', 'purchases', 'send', 'delete', 'pay', 'approve', 'approval', 'external', 'credits', 'đăng', 'mua', 'gửi', 'xóa', 'duyệt', 'trả']);
+const $ = id => document.getElementById(id);
+const stage = $('stage'), src = $('src'), cv = $('cv'), ctx = cv.getContext('2d');
+let words = [], i = 0, timer = null, t0 = 0, cnt, hist, currentSource = 'Nội dung nhập tay', currentFacts = [];
+let liveQueue = [], liveBusy = false, liveRequestCursor = null, liveChatVersions = new Map();
+
+/* ===== PHÂN LOẠI: mọi con số tính từ văn bản, không random ===== */
+function analyse() {
+  const TF = {}, L = {}, R = {};
+  words.forEach((w, k) => {
+    TF[w.norm] = (TF[w.norm] || 0) + 1;
+    (L[w.norm] ||= new Set()).add(k ? words[k - 1].norm : '^');
+    (R[w.norm] ||= new Set()).add(k < words.length - 1 ? words[k + 1].norm : '$');
+  });
+  words.forEach(w => {
+    const n = w.norm, tf = TF[n], ctxN = Math.min(L[n].size, R[n].size);
+    if (RISK.has(n)) w.c = { q: 'Khớp từ khóa rủi ro?', p: 0.5, route: 'you' };
+    else if (/\d/.test(n)) w.c = { q: 'Có số liệu cần đối chiếu?', p: 0.7, route: 'model' };
+    else if (STOP.has(n) || n.length <= 2) w.c = { q: 'Từ thông dụng?', p: 0.985, route: 'code' };
+    else if (ctxN >= 3) w.c = { q: 'Xuất hiện nhiều ngữ cảnh?', p: Math.max(0.8, 0.93 - 0.02 * (ctxN - 3)), route: 'model' };
+    else if (!w.start && /^\p{Lu}/u.test(w.raw)) w.c = { q: 'Tên riêng cần đối chiếu?', p: 0.75, route: 'model' };
+    else {
+      const p = tf >= 2 ? Math.min(0.99, 0.95 + 0.02 * Math.log2(tf)) : 0.93 + 0.003 * Math.min(n.length, 10);
+      w.c = { q: 'Độ khớp heuristic?', p, route: p >= THRESH ? 'code' : 'model' };
+    }
+  });
+}
+
+/* ===== DỰNG & CHẠY ===== */
+function build(text, source = 'Nội dung nhập tay', facts = ['Nguồn: văn bản do bạn nhập']) {
+  currentSource = source; currentFacts = facts;
+  $('session-facts').replaceChildren(...facts.map(text => el('span', '', text)));
+  $('session-detail').textContent = 'Đang chạy bộ quy tắc minh họa trên từng từ; đây không phải quyết định thật của model hoặc API.';
+  t0 = performance.now();
+  stop(); src.replaceChildren(); words = []; i = 0; flows = []; legs = []; hub = null;
+  let atStart = true, line = 1;
+  for (const m of text.matchAll(/(\s+)|(\S+)/g)) {
+    if (m[1]) { src.append(m[1]); const nl = (m[1].match(/\n/g) || []).length; if (nl) { atStart = true; line += nl; } continue; }
+    const raw = m[2], norm = raw.toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+    const el = document.createElement('span'); el.textContent = raw; src.append(el);
+    if (norm) words.push({ el, raw, norm, start: atStart, line });
+    atStart = /[.!?]$/.test(raw);
+  }
+  analyse();
+  cnt = { code: 0, model: 0, you: 0 }; hist = [];
+  $('stream').replaceChildren(); $('spark').replaceChildren(); $('avg').textContent = 'avg –';
+  $('dots').replaceChildren(...words.map(() => document.createElement('span')));
+  $('n-all').textContent = words.length;
+  sizeCanvas(); paint(); start();
+}
+
+function start() { clearInterval(timer); t0 = performance.now(); timer = setInterval(tick, STEP); $('pause').textContent = 'Tạm dừng'; }
+function stop() { clearInterval(timer); timer = null; }
+
+function tick() {
+  if (i >= words.length) {
+    stop(); src.querySelector('.cur')?.classList.remove('cur'); hub = null; $('pause').textContent = 'Xong';
+    if (liveBusy) liveBusy = false;
+    if (liveQueue.length) setTimeout(runNextLiveEvent, 100);
+    return;
+  }
+  const w = words[i], c = w.c;
+  src.querySelector('.cur')?.classList.remove('cur');
+  w.el.className = 'w ' + c.route + ' cur';
+  const tgt = Math.max(0, w.el.offsetTop - src.clientHeight / 2); src.scrollTop += (tgt - src.scrollTop) * (RM ? 1 : 0.4);
+  $('ln').textContent = 'ln ' + w.line + ' · ' + (i + 1) + '/' + words.length;
+  cnt[c.route]++; hist.push(c.p); w.born = performance.now();
+  if (!RM) $('c-' + c.route).animate([{ boxShadow: '0 0 22px ' + COL[c.route] }, { boxShadow: '0 0 0 transparent' }], 380);
+  $('dots').children[i].style.background = COL[c.route];
+  spider(w);
+  row(w);
+  i++; paint();
+}
+
+/* ===== VẼ: vòng cung tia, mạng nhện, dòng chảy ===== */
+const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const ease = t => 1 - Math.pow(1 - t, 3);
+let W = 0, H = 0, CW = 150, flows = [], legs = [], hub = null;
+
+function sizeCanvas() {
+  const dpr = Math.min(2, devicePixelRatio || 1);
+  W = stage.clientWidth; H = stage.clientHeight; CW = $('cards').offsetWidth;
+  cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+addEventListener('resize', sizeCanvas);
+
+const rel = (el, sr) => { const r = el.getBoundingClientRect(); return [r.left + r.width / 2 - sr.left, r.top + r.height / 2 - sr.top, r]; };
+
+// Tick thứ k nằm trên một cung tròn tâm cố định, trải đều theo thứ tự đọc
+function geo(k) {
+  const R = H * 0.75, cx = W - CW - 80 - R, n = Math.max(1, words.length);
+  const amax = Math.asin(Math.min(0.95, (H / 2 - 16) / R));
+  const a = -amax + 2 * amax * (k + 0.5) / n, c = Math.cos(a), s = Math.sin(a);
+  return { x: cx + R * c, y: H / 2 + R * s, c, s, R, cx, amax, n };
+}
+
+function spider(w) {
+  const sr = stage.getBoundingClientRect(), now = performance.now();
+  const [x, y] = rel(w.el, sr), g = geo(i);
+  hub = { x, y };
+  const near = [];
+  for (let d = -5; d <= 5; d++) if (d && words[i + d]) near.push(words[i + d]);
+  words.slice(0, i).filter(o => o.norm === w.norm).slice(-4).forEach(o => near.push(o));
+  near.forEach(o => { const [ox, oy] = rel(o.el, sr); if (oy > 0 && oy < sr.height) legs.push({ x, y, ox, oy, born: now }); });
+  const cr = $('c-' + w.c.route).getBoundingClientRect();
+  flows.push({ b: [x, y, x + (g.x - x) * 0.5, y, g.x - (g.x - x) * 0.3, g.y, g.x, g.y], born: now, route: w.c.route,
+    g, len: 8 + 34 * w.c.p, cx: cr.left - sr.left, cy: cr.top - sr.top + cr.height / 2 });
+}
+
+const bez = (b, t) => { const u = 1 - t; return [u*u*u*b[0] + 3*u*u*t*b[2] + 3*u*t*t*b[4] + t*t*t*b[6], u*u*u*b[1] + 3*u*u*t*b[3] + 3*u*t*t*b[5] + t*t*t*b[7]]; };
+
+function drawArc(now) {
+  if (!words.length) return;
+  const g0 = geo(0);
+  ctx.strokeStyle = 'rgba(92,105,95,.12)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(g0.cx, H / 2, g0.R - 8, -g0.amax, g0.amax); ctx.stroke();
+  ctx.lineWidth = Math.max(0.7, Math.min(2.4, g0.R * 2 * g0.amax / g0.n * 0.55)); ctx.lineCap = 'round';
+  for (let k = 0; k < words.length; k++) {
+    const g = geo(k); let len = 8;
+    if (k < i) {
+      const w = words[k]; len = 8 + 34 * w.c.p * (RM ? 1 : ease(Math.min(1, (now - w.born) / 350)));
+      ctx.strokeStyle = COL[w.c.route]; ctx.globalAlpha = 0.95;
+    } else { ctx.strokeStyle = 'rgba(106,119,108,.28)'; ctx.globalAlpha = 1; }
+    ctx.beginPath(); ctx.moveTo(g.x, g.y); ctx.lineTo(g.x + g.c * len, g.y + g.s * len); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  if (hub && i > 0) {      // vạch trắng quét theo từ đang đọc
+    const g = geo(i - 1);
+    ctx.save(); ctx.shadowColor = '#fffefa'; ctx.shadowBlur = 5; ctx.strokeStyle = '#805f4b'; ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.moveTo(g.x - g.c * 6, g.y - g.s * 6); ctx.lineTo(g.x + g.c * 56, g.y + g.s * 56); ctx.stroke(); ctx.restore();
+  }
+}
+
+function drawLegs(now) {
+  while (legs.length && now - legs[0].born > 1100) legs.shift();
+  ctx.setLineDash([2, 3]); ctx.lineWidth = 0.8;
+  legs.forEach(l => {
+    const age = now - l.born, p = RM ? 1 : ease(Math.min(1, age / 250));
+    ctx.globalAlpha = 0.45 * (1 - age / 1100); ctx.strokeStyle = '#805f4b';
+    ctx.beginPath(); ctx.moveTo(l.x, l.y); ctx.lineTo(l.x + (l.ox - l.x) * p, l.y + (l.oy - l.y) * p); ctx.stroke();
+  });
+  ctx.setLineDash([]); ctx.globalAlpha = 1;
+}
+
+function drawFlows(now) {
+  while (flows.length && now - flows[0].born > 1600) flows.shift();
+  flows.forEach(f => {
+    const age = now - f.born, p = RM ? 1 : Math.min(1, age / 450), e = ease(p);
+    const alpha = age < 900 ? 1 : Math.max(0, 1 - (age - 900) / 700), col = COL[f.route];
+    ctx.save(); ctx.globalAlpha = alpha * 0.72; ctx.strokeStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 2; ctx.lineWidth = 1.3;
+    ctx.beginPath();
+    for (let s = 0, t0 = Math.max(0, e - 0.55); s <= 18; s++) { const [x, y] = bez(f.b, t0 + (e - t0) * s / 18); s ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+    ctx.stroke();
+    if (p < 1) { const [hx, hy] = bez(f.b, e); ctx.fillStyle = col; ctx.beginPath(); ctx.arc(hx, hy, 2.8, 0, 7); ctx.fill(); }
+    else {                 // đoạn cuối: từ đầu tick tới thẻ đích
+      const q = Math.min(1, (age - 450) / 250), ox = f.g.x + f.g.c * f.len, oy = f.g.y + f.g.s * f.len;
+      ctx.globalAlpha = alpha * 0.4; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ox + (f.cx - ox) * q, oy + (f.cy - oy) * q); ctx.stroke();
+    }
+    ctx.restore();
+  });
+}
+
+function drawHub(now) {    // "con nhện": lõi sáng, quầng và vòng xung quanh từ đang đọc
+  if (!hub) return;
+  const pulse = RM ? 0 : Math.sin(now / 180);
+  ctx.strokeStyle = 'rgba(167,91,76,.48)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(hub.x, hub.y, 10 + pulse * 2, 0, 7); ctx.stroke();
+  ctx.fillStyle = '#805f4b'; ctx.beginPath(); ctx.arc(hub.x, hub.y, 3, 0, 7); ctx.fill();
+}
+
+(function frame(now) {
+  ctx.clearRect(0, 0, W, H);
+  drawArc(now); drawLegs(now); drawFlows(now); drawHub(now);
+  requestAnimationFrame(frame);
+})(performance.now());
+
+
+/* ===== BẢNG SỐ LIỆU ===== */
+function row(w) {
+  const r = document.createElement('div'); r.className = 'row';
+  const mk = (t, cls) => { const s = document.createElement('span'); s.textContent = t; if (cls) s.className = cls; return s; };
+  const chip = mk(w.raw.slice(0, 14), 'chip');
+  const group = { code: 'theo luật', model: 'ngữ cảnh', you: 'xem xét' }[w.c.route];
+  r.append(mk(((performance.now() - t0) / 1000).toFixed(2) + 's'), chip, mk(w.c.q), mk(w.c.p.toFixed(3), w.c.route), mk('→ ' + group, w.c.route));
+  $('stream').prepend(r);
+  if (!RM) r.animate([{ opacity: 0, transform: 'translateY(-8px)' }, { opacity: 1, transform: 'none' }], 200);
+  while ($('stream').children.length > 9) $('stream').lastChild.remove();
+}
+
+function paint() {
+  const n = i, tot = Math.max(1, n);
+  $('n-read').textContent = n;
+  $('session-summary').textContent = words.length
+    ? `${currentSource} · ${i >= words.length ? 'Đã quét xong' : 'Đang quét'} ${nf.format(i)} / ${nf.format(words.length)} từ`
+    : 'Đang chờ request FreeLLMAPI mới…';
+  ['code', 'model', 'you'].forEach(k => {
+    $('n-' + k).textContent = cnt[k]; $('t-' + k).textContent = cnt[k];
+    $('c-' + k).querySelector('b').textContent = cnt[k];
+    $('b-' + k).style.width = (cnt[k] / tot * 100) + '%';
+  });
+  $('session-detail').textContent = `Tạm tính trên ${nf.format(i)} từ đã quét: ${nf.format(cnt.code)} theo luật, ${nf.format(cnt.model)} cần ngữ cảnh, ${nf.format(cnt.you)} khớp từ khóa rủi ro. Đây là phân loại heuristic, không phải số liệu routing của API.`;
+  $('pct').textContent = Math.round(cnt.code / tot * 100) + '%';
+  $('who').replaceChildren(...[['theo luật', cnt.code + ' từ khớp quy tắc demo'], ['cần ngữ cảnh', cnt.model + ' từ phân loại heuristic'], ['cần xem xét', cnt.you + ' từ khớp danh sách minh họa']].map(([k, t], j) => {
+    const d = document.createElement('div'); d.style.color = COL[['code', 'model', 'you'][j]]; d.textContent = k + ': ' + t; return d;
+  }));
+  const h = hist.slice(-40);
+  if (h.length) {
+    $('avg').textContent = 'Trung bình ' + (hist.reduce((a, b) => a + b, 0) / hist.length).toFixed(3) + ' · ' + hist.length + ' từ · heuristic';
+    const pts = h.map((p, k) => (k * 300 / 39).toFixed(1) + ',' + (68 - Math.max(0, (p - 0.45) / 0.55) * 66).toFixed(1)).join(' ');
+    const ty = (68 - (THRESH - 0.45) / 0.55 * 66).toFixed(1);
+    $('spark').innerHTML = `<line x1="0" x2="300" y1="${ty}" y2="${ty}" stroke="#758078" stroke-dasharray="3 3"/><polyline points="${pts}" fill="none" stroke="#a75b4c" stroke-width="1.5"/>`;
+  }
+}
+
+/* ===== DỮ LIỆU THẬT & ĐIỀU KHIỂN ===== */
+$('go').onclick = () => { const t = $('ta').value.trim(); if (t) build(t, 'Văn bản nhập thủ công', ['Nguồn: văn bản do bạn nhập']); else $('msg').textContent = 'Chưa có request mới hoặc nội dung để phân tích.'; };
+$('replay').onclick = () => { const t = $('ta').value.trim(); if (t) build(t, currentSource, currentFacts); else $('msg').textContent = 'Chưa có request mới để chạy lại.'; };
+$('pause').onclick = () => { if (i >= words.length) return; if (timer) { stop(); $('pause').textContent = 'Tiếp tục'; } else { t0 = performance.now() - 0; timer = setInterval(tick, STEP); $('pause').textContent = 'Tạm dừng'; } };
+
+$('spd').oninput = e => { STEP = 430 - +e.target.value; if (timer) { clearInterval(timer); timer = setInterval(tick, STEP); } };
+$('msg').textContent = 'Đang chờ request FreeLLMAPI mới…';
+
+/* ===== Đồng bộ cục bộ từ FreeLLMAPI ===== */
+const nf = new Intl.NumberFormat('vi-VN');
+const asNum = n => nf.format(Number(n || 0));
+const asMs = n => n == null ? '—' : asNum(Math.round(n)) + ' ms';
+const asTime = s => { const d = new Date(String(s || '').replace(' ', 'T') + (String(s || '').includes('Z') ? '' : 'Z')); return Number.isNaN(d.getTime()) ? String(s || '') : d.toLocaleString('vi-VN'); };
+const el = (tag, cls = '', text = '') => {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== '') node.textContent = String(text);
+  return node;
+};
+
+function makeTable(targetId, headers, rows) {
+  const host = $(targetId); host.replaceChildren();
+  if (!rows.length) { host.appendChild(el('div', 'live-empty', 'Chưa có dữ liệu trong khoảng đã chọn.')); return; }
+  const table = document.createElement('table'); table.className = 'live-table';
+  const thead = document.createElement('thead'), trh = document.createElement('tr');
+  headers.forEach(h => trh.appendChild(el('th', '', h)));
+  thead.appendChild(trh); table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  rows.forEach(row => {
+    const tr = document.createElement('tr');
+    row.forEach((value, index) => {
+      const td = el('td', index === 0 && (value === 'error' || value === 'Rate limited (429)') ? 'bad' : '');
+      td.textContent = value == null ? '—' : String(value); tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody); host.appendChild(table);
+}
+
+function stat(label, value, cls = '') {
+  const box = el('div', 'live-stat' + (cls ? ' ' + cls : ''));
+  box.append(el('small', '', label), el('strong', '', value)); return box;
+}
+
+function renderSnapshot(data) {
+  const rangeLabel = { '24h': '24 giờ qua', '7d': '7 ngày qua', '30d': '30 ngày qua', '90d': '90 ngày qua' }[data.range] || data.range;
+  const topProvider = [...(data.byProvider || [])].sort((a, b) => Number(b.requests || 0) - Number(a.requests || 0))[0];
+  const topModel = [...(data.byModel || [])].sort((a, b) => Number(b.requests || 0) - Number(a.requests || 0))[0];
+  const facts = [
+    `${rangeLabel}: ${asNum(data.requests)} request`,
+    `thành công ${Number(data.successRate || 0).toFixed(1)}%`,
+    `lỗi ${asNum(data.failedRequests)}`,
+    `độ trễ trung bình ${asMs(data.avgLatencyMs)} · P95 ${asMs(data.p95LatencyMs)}`,
+    topProvider ? `provider nhiều request nhất: ${topProvider.platform} (${asNum(topProvider.requests)})` : '',
+    topModel ? `model nhiều request nhất: ${topModel.display_name || topModel.model_id} (${asNum(topModel.requests)})` : ''
+  ].filter(Boolean);
+  $('snapshot-summary').replaceChildren(el('b', '', 'Tóm tắt từ snapshot thật'), el('span', '', facts.join(' · ')), el('small', '', 'Tóm tắt quy tắc, không do AI suy đoán.'));
+  const stats = $('live-stats'); stats.replaceChildren(
+    stat('Tổng request', asNum(data.requests)),
+    stat('Tỷ lệ request thành công', `${Number(data.successRate || 0).toFixed(1)}%`, 'ok'),
+    stat('Request lỗi', asNum(data.failedRequests), 'fail'),
+    stat('Lượt thử ở provider bị lỗi', asNum(data.failedAttempts), 'fail'),
+    stat('Token đầu vào', asNum(data.inputTokens)),
+    stat('Token đầu ra', asNum(data.outputTokens)),
+    stat('Độ trễ trung bình', asMs(data.avgLatencyMs)),
+    stat('Độ trễ P95', asMs(data.p95LatencyMs)),
+    stat('Thời gian tới token đầu (TTFT)', asMs(data.avgTtfbMs)),
+    stat('Request đã hủy', asNum(data.canceledRequests))
+  );
+  makeTable('recent-calls', ['Thời điểm', 'Model', 'Nhà cung cấp', 'Trạng thái', 'Lượt thử', 'Token vào', 'Token ra', 'Độ trễ'],
+    (data.recentCalls || []).map(r => [asTime(r.created_at), r.model_id, r.platform, r.status,
+      r.attempts ? `${r.attempts}${r.failed_attempts ? ` · ${r.failed_attempts} lỗi` : ''}` : '—',
+      asNum(r.input_tokens), asNum(r.output_tokens), asMs(r.latency_ms)]));
+  makeTable('provider-breakdown', ['Nhà cung cấp', 'Request', 'Thành công', 'Lỗi', 'Độ trễ TB', 'P95', 'TTFT', 'Token vào', 'Token ra'],
+    (data.byProvider || []).map(r => [r.platform, asNum(r.requests), `${Number(r.successRate || 0).toFixed(1)}%`, asNum(r.failed),
+      asMs(r.avg_latency_ms), asMs(r.p95LatencyMs), asMs(r.avg_ttfb_ms), asNum(r.input_tokens), asNum(r.output_tokens)]));
+  makeTable('model-breakdown', ['Model', 'Nhà cung cấp', 'Request', 'Ghim', 'Thành công', 'Lỗi', 'Độ trễ TB', 'Token vào', 'Token ra'],
+    (data.byModel || []).map(r => [r.display_name || r.model_id, r.platform, asNum(r.requests), asNum(r.pinned),
+      `${Number(r.successRate || 0).toFixed(1)}%`, asNum(r.failed), asMs(r.avg_latency_ms), asNum(r.input_tokens), asNum(r.output_tokens)]));
+  makeTable('error-breakdown', ['Nhóm lỗi', 'Số lần'], [
+    ...Object.entries(data.errorsByCategory || {}).map(([name, count]) => [name, asNum(count)]),
+    ...Object.entries(data.errorsByProvider || {}).map(([name, count]) => [`Provider · ${name}`, asNum(count)])
+  ]);
+}
+
+function showChats(chats) {
+  const host = $('recent-chats'); host.replaceChildren();
+  if (!chats.length) { host.appendChild(el('div', 'live-empty', 'Chưa có hội thoại Playground đã lưu.')); return; }
+  chats.forEach(chat => {
+    const details = document.createElement('details'); details.className = 'live-chat';
+    details.appendChild(el('summary', '', `${chat.title || 'Hội thoại'} · ${chat.model || 'model'} · ${asTime(new Date(chat.updatedAt).toISOString())}`));
+    (chat.messages || []).forEach(message => {
+      details.appendChild(el('p', '', `${message.role === 'user' ? 'Bạn' : (message.model || 'Assistant')}: ${message.content || ''}`));
+      (message.fusionPanel || []).forEach(panel => {
+        const status = panel.status ? ` · ${panel.status}` : '';
+        details.appendChild(el('p', '', `↳ ${panel.platform}/${panel.model}${status}: ${panel.content || ''}`));
+      });
+    });
+    host.appendChild(details);
+  });
+}
+
+function runNextLiveEvent() {
+  if (liveBusy || timer || !liveQueue.length) return;
+  const event = liveQueue.shift(); liveBusy = true;
+  $('msg').textContent = event.label;
+  $('ta').value = event.text;
+  build(event.text.slice(0, 20000), event.label, event.facts);
+}
+
+function queueLiveEvent(label, text, facts = []) {
+  if (!text) return;
+  liveQueue.push({ label, text, facts: facts.length ? facts : [`Nguồn: ${label}`] });
+  if (liveQueue.length > 100) liveQueue.shift();
+  runNextLiveEvent();
+}
+
+let syncBusy = false;
+async function syncFreeLLMAPI() {
+  if (syncBusy) return;
+  syncBusy = true;
+  try {
+    const range = $('analytics-range').value;
+    const [snapshotRes, chatsRes] = await Promise.all([
+      fetch(`/api/snapshot?range=${encodeURIComponent(range)}`, { cache: 'no-store' }),
+      fetch('/api/chats', { cache: 'no-store' })
+    ]);
+    if (!snapshotRes.ok || !chatsRes.ok) throw new Error('Bridge không đọc được dữ liệu cục bộ');
+    const data = await snapshotRes.json(), chats = await chatsRes.json();
+    renderSnapshot(data); showChats(chats);
+    $('sync-state').textContent = `Đã đồng bộ · ${data.range} · cập nhật ${new Date(data.updatedAt).toLocaleTimeString('vi-VN')}`;
+
+    if (liveRequestCursor === null) {
+      const latest = (data.recentCalls || [])[0];
+      liveRequestCursor = Number(data.latestRequestId || latest?.id || 0);
+      if (latest) {
+        const failures = Number(latest.failed_attempts || 0);
+        const text = `Request gần nhất · ${latest.created_at || ''}\n${latest.platform || 'provider?'} / ${latest.model_id || 'model?'}\n${String(latest.status || 'unknown').toUpperCase()} · ${latest.attempts || 0} lượt thử · ${failures} lỗi provider\n${latest.input_tokens || 0} token đầu vào / ${latest.output_tokens || 0} token đầu ra · ${latest.latency_ms || 0} ms`;
+        queueLiveEvent(`Request gần nhất · ${latest.status || 'chưa rõ'}`, text, [
+          'Nguồn: request FreeLLMAPI gần nhất trong snapshot', `Model: ${latest.model_id || 'không rõ'}`,
+          `Provider: ${latest.platform || 'không rõ'} · trạng thái: ${latest.status || 'không rõ'}`,
+          `Lượt thử: ${latest.attempts || 0} · lỗi provider: ${failures}`,
+          `Token vào/ra: ${asNum(latest.input_tokens)} / ${asNum(latest.output_tokens)}`,
+          `Độ trễ: ${asMs(latest.latency_ms)}`
+        ]);
+      }
+    }
+
+    chats.forEach(chat => {
+      const key = String(chat.id), version = Number(chat.updatedAt || 0), old = liveChatVersions.get(key);
+      if (old === undefined) { liveChatVersions.set(key, version); return; }
+      if (version <= old) return;
+      liveChatVersions.set(key, version);
+      const recent = (chat.messages || []).slice(-2);
+      const lines = [];
+      recent.forEach(message => {
+        lines.push(`${message.role.toUpperCase()}: ${message.content || ''}`);
+        (message.fusionPanel || []).forEach(panel => lines.push(`PANEL ${panel.platform}/${panel.model} ${panel.status || ''}: ${panel.content || ''}`));
+      });
+      queueLiveEvent(`Playground · ${chat.title || 'hội thoại mới'}`, lines.join('\n'), [
+        'Nguồn: hội thoại Playground đã lưu', `Model: ${chat.model || 'không rõ'}`, `Cập nhật: ${new Date(version).toLocaleString('vi-VN')}`
+      ]);
+    });
+  } catch (error) {
+    $('sync-state').textContent = `Chưa kết nối · ${error.message}`;
+  } finally {
+    syncBusy = false;
+  }
+}
+
+$('analytics-range').addEventListener('change', syncFreeLLMAPI);
+syncFreeLLMAPI();
+setInterval(syncFreeLLMAPI, 2000);
+
+let requestPollBusy = false;
+async function pollNewRequests() {
+  if (requestPollBusy || liveRequestCursor === null) return;
+  requestPollBusy = true;
+  try {
+    const response = await fetch(`/api/events?after=${liveRequestCursor}`, { cache: 'no-store' });
+    if (!response.ok) return;
+    const events = await response.json();
+    events.forEach(event => {
+      liveRequestCursor = Math.max(liveRequestCursor, Number(event.id || 0));
+      const failures = Number(event.failed_attempts || 0);
+      const text = `Request #${event.id} · ${event.created_at || ''}\n${event.platform}/${event.model_id}\n${String(event.status || 'unknown').toUpperCase()} · ${event.attempts || 0} attempts · ${failures} failures\n${event.input_tokens || 0} input / ${event.output_tokens || 0} output tokens · ${event.latency_ms || 0} ms`;
+      queueLiveEvent(`Request #${event.id} · ${event.status}${failures ? ` · ${failures} lỗi` : ''}`, text, [
+        `Nguồn: request FreeLLMAPI #${event.id}`, `Model: ${event.model_id || 'không rõ'}`,
+        `Provider: ${event.platform || 'không rõ'} · trạng thái: ${event.status || 'không rõ'}`,
+        `Lượt thử: ${event.attempts || 0} · lỗi provider: ${failures}`,
+        `Token vào/ra: ${asNum(event.input_tokens)} / ${asNum(event.output_tokens)}`,
+        `Độ trễ: ${asMs(event.latency_ms)}`
+      ]);
+    });
+    if (events.length) $('sync-state').textContent += ` · nhận ${events.length} request mới`;
+    else if (!timer && !liveQueue.length) $('msg').textContent = `Đang chờ request FreeLLMAPI mới… · kiểm tra ${new Date().toLocaleTimeString('vi-VN')}`;
+  } catch { /* lần polling kế tiếp tự thử lại */ }
+  finally { requestPollBusy = false; }
+}
+pollNewRequests();
+setInterval(pollNewRequests, 1000);
+</script>
+</body>
+</html>
