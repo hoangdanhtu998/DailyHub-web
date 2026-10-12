@@ -30,8 +30,9 @@
   const list = s => String(s || '').split(',').map(x => x.trim()).filter(Boolean);
   const toast = (node, msg, isError) => { node.replaceChildren(h('p', { class: isError ? 'hub-error' : 'hub-ok', role: 'status', text: msg })); };
 
-  async function api(method, path, body) {
+  async function api(method, path, body, timeoutMs = 0) {
     const opts = { method, headers: { Accept: 'application/json' } };
+    if (timeoutMs > 0) opts.signal = AbortSignal.timeout(timeoutMs);
     if (method !== 'GET') opts.headers['X-DailyHub'] = '1';
     if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
     let res;
@@ -49,8 +50,27 @@
 
   /* ---------- state ---------- */
   const state = { tab: 'search', searchQ: '', res: { kind: '', q: '', sort: 'score', saved: false, unseen: false, author: '', offset: 0 },
-    editingPrompt: null, editingMemory: null, memFilter: { q: '', kind: '', stale: false, pinned: false } };
+    editingPrompt: null, editingMemory: null, aiResourceRanks: new Map(), memFilter: { q: '', kind: '', stale: false, pinned: false } };
+  let aiRankError = '';
+  let aiRankRetryAfter = 0;
   const body = () => $('lib-body');
+
+  async function rankResourceItems(items) {
+    const missing = items.filter(item => !state.aiResourceRanks.has(item.id));
+    if (missing.length && Date.now() >= aiRankRetryAfter) {
+      try {
+        for (let i = 0; i < missing.length; i += 40) {
+          const ranked = await api('POST', '/ai/rank-resources', { items: missing.slice(i, i + 40) });
+          for (const item of ranked.items || []) state.aiResourceRanks.set(item.id, item);
+        }
+        aiRankError = '';
+      } catch (err) {
+        aiRankError = err.message;
+        aiRankRetryAfter = Date.now() + 30000;
+      }
+    }
+    return items.map(item => ({ ...item, aiRank: state.aiResourceRanks.get(item.id) }));
+  }
 
   /* ---------- Tài nguyên ---------- */
   function resourceCard(r) {
@@ -68,11 +88,13 @@
       onchange: async e => { await api('PATCH', `/resources/${r.id}/state`, { note: e.target.value }); } });
     const breakdown = Object.entries(r.score_breakdown || {}).map(([k, v]) =>
       h('li', { text: `${SCORE_LABEL[k] || k}: ${v.points == null ? '–' : v.points}${v.max ? '/' + v.max : ''} — ${v.reason || ''}` }));
+    const aiRank = r.aiRank || state.aiResourceRanks.get(r.id);
     return h('article', { class: 'hub-card' + (r.seen ? ' is-seen' : '') },
       h('div', { class: 'hub-row' },
         h('span', { class: 'hub-badge kind-' + r.kind, text: KIND[r.kind] || r.kind }),
         r.status !== 'active' ? h('span', { class: 'hub-badge warn', text: STATUS[r.status] || r.status }) : null,
-        h('span', { class: 'hub-score', text: r.score == null ? 'Chưa chấm điểm' : `Điểm ${r.score}/100` })),
+        h('span', { class: 'hub-score', text: aiRank ? `Điểm AI ${aiRank.score}/100`
+          : r.score == null ? 'AI chưa chấm điểm' : `Điểm kỹ thuật ${r.score}/100` })),
       h('h3', { class: 'hub-title' }, href ? h('a', { href, target: '_blank', rel: 'noopener noreferrer', text: r.name }) : r.name),
       r.author ? h('p', { class: 'ov-muted', text: 'Tác giả/tổ chức: ' + r.author }) : null,
       r.description ? h('p', { class: 'hub-desc', text: r.description }) : null,
@@ -84,7 +106,8 @@
         r.last_updated ? `Cập nhật nguồn: ${r.last_updated}` : null,
         r.license ? `Giấy phép: ${r.license}` : null,
       ].filter(Boolean).join(' · ') }),
-      h('details', { class: 'hub-details' }, h('summary', { text: 'Vì sao có điểm này?' }), h('ul', {}, breakdown)),
+      aiRank ? h('details', { class: 'hub-details' }, h('summary', { text: 'Vì sao có điểm AI này?' }), h('p', { class: 'ov-muted', text: aiRank.reason }))
+        : breakdown.length ? h('details', { class: 'hub-details' }, h('summary', { text: 'Tiêu chí điểm kỹ thuật' }), h('ul', {}, breakdown)) : null,
       h('div', { class: 'hub-row' }, saveBtn, seenBtn, rating),
       note);
   }
@@ -103,6 +126,8 @@
     const r = state.res;
     r.offset = 0;
     const data = await api('GET', '/resources?' + resourceQuery(r).toString());
+    data.items = await rankResourceItems(data.items);
+    if (r.sort === 'score') data.items.sort((a, b) => (b.aiRank?.score ?? b.score ?? 0) - (a.aiRank?.score ?? a.score ?? 0));
     const select = (id, label, opts, value, onchange) => h('label', { class: 'hub-field' }, label,
       h('select', { id, class: 'hub-input', onchange }, opts.map(([v, t]) => h('option', { value: v, text: t, selected: v === value }))));
     const filters = h('div', { class: 'hub-filters' },
@@ -123,11 +148,14 @@
       ? h('button', { class: 'hub-btn', type: 'button', text: 'Xem thêm', onclick: async () => {
           r.offset += data.items.length;
           const next = await api('GET', '/resources?' + resourceQuery(r).toString());
+          next.items = await rankResourceItems(next.items);
+          if (r.sort === 'score') next.items.sort((a, b) => (b.aiRank?.score ?? b.score ?? 0) - (a.aiRank?.score ?? a.score ?? 0));
           listEl.append(...next.items.map(resourceCard));
           data.items = data.items.concat(next.items);
           if (data.total <= r.offset) more.remove();
         } }) : null;
-    body().replaceChildren(h('p', { class: 'ov-muted', text: `${fmtNum(data.total)} tài nguyên khớp bộ lọc. Điểm chỉ là chỉ dẫn; bấm “Vì sao có điểm này?” để xem từng tiêu chí.` }), filters, search, listEl, more);
+    body().replaceChildren(h('p', { class: 'ov-muted', text: `${fmtNum(data.total)} tài nguyên khớp bộ lọc. AI xếp hạng theo mô tả và dữ liệu nguồn; khi AI mất kết nối, danh sách vẫn hiện điểm kỹ thuật.` }),
+      aiRankError ? h('p', { class: 'hub-warn', text: `AI chưa xếp hạng được: ${aiRankError}` }) : null, filters, search, listEl, more);
   }
 
   /* ---------- Prompt Library ---------- */
@@ -259,7 +287,8 @@
 
   /* ---------- Nguồn & cài đặt ---------- */
   async function renderSources() {
-    const [src, settings] = await Promise.all([api('GET', '/sources'), api('GET', '/settings')]);
+    const [src, settings, aiStatus] = await Promise.all([api('GET', '/sources'), api('GET', '/settings'), api('GET', '/ai/status')]);
+    const aiModels = await api('GET', '/ai/models').catch(() => ({ models: [], selected: aiStatus.model || 'auto' }));
     const srcList = h('ul', { class: 'hub-items' }, src.items.map(s => h('li', {},
       h('label', { class: 'hub-check' }, h('input', { type: 'checkbox', checked: s.enabled, onchange: async e => { await api('PATCH', `/sources/${s.id}`, { enabled: e.target.checked }); renderSources(); } }), ' ', s.name),
       h('span', { class: 'ov-muted', text: ` · ${s.type} · ${s.url} · ok ${s.ok_count} / lỗi ${s.fail_count}${s.last_error ? ' · lỗi gần nhất: ' + s.last_error : ''}` }),
@@ -280,6 +309,7 @@
     const wLon = h('input', { class: 'hub-input', type: 'number', step: 'any', min: -180, max: 180, value: s.weather.longitude, 'aria-label': 'Kinh độ' });
     const wTz = h('input', { class: 'hub-input', value: s.weather.timezone, 'aria-label': 'Múi giờ thời tiết' });
     const en = h('input', { type: 'checkbox', checked: s.schedule.enabled });
+    const aiAuto = h('input', { type: 'checkbox', checked: s.schedule.ai_enabled !== false });
     const time = h('input', { class: 'hub-input', type: 'time', value: s.schedule.time, 'aria-label': 'Giờ chạy' });
     const tz = h('input', { class: 'hub-input', value: s.schedule.timezone, 'aria-label': 'Múi giờ' });
     const topics = h('input', { class: 'hub-input', value: s.github.topics.join(', '), 'aria-label': 'Topic GitHub' });
@@ -290,9 +320,108 @@
     const bEnabled = h('input', { type: 'checkbox', checked: s.backup.enabled });
     const bKeep = h('input', { class: 'hub-input hub-small', type: 'number', min: 1, max: 60, value: s.backup.keep });
     const setMsg = h('div', { role: 'status' });
+    const aiKey = h('input', { class: 'hub-input', type: 'password', maxlength: 512, autocomplete: 'off', placeholder: 'Dán unified API key từ FreeLLMAPI Desktop', 'aria-label': 'Unified API key FreeLLMAPI' });
+    const aiMsg = h('div', { role: 'status' });
+    const aiStatusText = aiStatus.available ? `Đã kết nối · model ${aiStatus.model}` : aiStatus.configured ? aiStatus.message : 'Chưa kết nối. Mở FreeLLMAPI Desktop rồi dán unified API key.';
+    let selectedModel = aiModels.selected || 'auto';
+    const modelCounts = {
+      errors: aiModels.models.filter(m => m.errors > 0).length,
+      ok: aiModels.models.filter(m => m.state === 'ok').length,
+      unknown: aiModels.models.filter(m => m.state === 'unknown').length,
+      rateLimited: aiModels.models.filter(m => m.rate_limits > 0).length,
+      temporary: aiModels.models.filter(m => m.temporary_failures > 0).length,
+      tested: aiModels.models.filter(m => m.probe?.state === 'ok').length,
+    };
+    const modelFilter = h('select', { class: 'hub-input', 'aria-label': 'Lọc model theo trạng thái API' },
+      h('option', { value: 'all', text: `Tất cả trạng thái (${aiModels.models.length})` }),
+      h('option', { value: 'error', text: `Lỗi API không phải rate limit (${modelCounts.errors})` }),
+      h('option', { value: 'rate_limited', text: `Rate limit · giữ lại (${modelCounts.rateLimited})` }),
+      h('option', { value: 'temporary', text: `Lỗi tạm thời · giữ lại (${modelCounts.temporary})` }),
+      (modelCounts.testedOption = h('option', { value: 'test_ok', text: `Test nhanh thành công (${modelCounts.tested})` })),
+      h('option', { value: 'ok', text: `Đang ổn (${modelCounts.ok})` }),
+      h('option', { value: 'unknown', text: `Chưa có log 7 ngày (${modelCounts.unknown})` }));
+    const modelSelect = h('select', { class: 'hub-input', 'aria-label': 'Chọn model AI', onchange: async e => {
+      try { const result = await api('POST', '/ai/model', { model: e.target.value }); selectedModel = result.model; refillModels(); window.dispatchEvent(new Event('dailyhub:model-changed')); toast(aiMsg, `Đã chọn model ${result.model}. Các tác vụ AI tiếp theo sẽ dùng model này.`, false); }
+      catch (err) { toast(aiMsg, err.message, true); }
+    } });
+    const modelStateLabel = m => m.probe?.state === 'ok' ? `test OK · ${m.probe.latency_ms} ms`
+      : m.probe?.state === 'rate_limited' ? 'test bị rate limit · giữ lại'
+        : m.probe?.state === 'temporary' ? 'test lỗi tạm thời · giữ lại'
+          : m.probe?.state === 'error' ? 'test thất bại'
+      : m.state === 'error' ? `fail chưa ổn · ${m.errors}`
+      : m.state === 'rate_limited' ? `rate limit · giữ lại (${m.rate_limits})`
+        : m.state === 'temporary' ? `lỗi tạm thời · giữ lại (${m.temporary_failures})`
+        : m.state === 'warning' ? `${m.errors ? `có lỗi · ${m.errors}` : 'đang ổn'}${m.rate_limits ? ` · rate limit ${m.rate_limits}` : ''}${m.temporary_failures ? ` · tạm thời ${m.temporary_failures}` : ''}`
+        : m.state === 'ok' ? `ổn · ${m.successes}/${m.attempts}`
+          : 'chưa có log 7 ngày';
+    const refillModels = () => {
+      const filter = modelFilter.value;
+      const matches = aiModels.models.filter(m => filter === 'all'
+        || (filter === 'error' && m.errors > 0)
+        || (filter === 'rate_limited' && m.rate_limits > 0)
+        || (filter === 'temporary' && m.temporary_failures > 0)
+        || (filter === 'test_ok' && m.probe?.state === 'ok') || m.state === filter);
+      const options = [h('option', { value: 'auto', text: 'Auto · FreeLLMAPI tự chọn model khả dụng' })];
+      if (selectedModel !== 'auto' && !matches.some(m => m.id === selectedModel)) {
+        options.push(h('option', { value: selectedModel, text: `${selectedModel} · đang chọn (ngoài bộ lọc)` }));
+      }
+      options.push(...matches.map(m => h('option', { value: m.id,
+        text: `${m.id} · ${modelStateLabel(m)}${m.provider ? ` · ${m.provider}` : ''}` })));
+      modelSelect.replaceChildren(...options);
+      modelSelect.value = selectedModel;
+    };
+    modelFilter.addEventListener('change', refillModels);
+    refillModels();
+    const aiTestOutput = h('div', { class: 'hub-ai-test-result', role: 'status', 'aria-live': 'polite' });
+    const aiTestButton = h('button', { class: 'hub-btn', type: 'button', text: 'Test nhanh model', onclick: async e => {
+      const button = e.currentTarget;
+      button.disabled = true;
+      button.textContent = 'Đang gọi AI…';
+      aiTestOutput.replaceChildren(h('p', { class: 'ov-muted', text: 'Đang gửi một prompt test rất ngắn.' }));
+      try {
+        const result = await api('POST', '/ai/test-model', { model: selectedModel });
+        const probe = { state: result.ok ? 'ok' : result.failure_kind, latency_ms: result.latency_ms, checked_at: Math.floor(Date.now() / 1000) };
+        if (selectedModel === 'auto') aiModels.auto_probe = probe;
+        else {
+          const item = aiModels.models.find(m => m.id === selectedModel);
+          if (item) item.probe = probe;
+        }
+        modelCounts.tested = aiModels.models.filter(m => m.probe?.state === 'ok').length;
+        modelCounts.testedOption.textContent = `Test nhanh thành công (${modelCounts.tested})`;
+        refillModels();
+        if (result.ok) {
+          aiTestOutput.replaceChildren(h('p', { class: 'hub-ok', text: `Test thành công · ${result.model} · ${result.latency_ms} ms` }),
+            h('p', { text: `AI trả lời: ${result.answer}` }));
+        } else {
+          aiTestOutput.replaceChildren(h('p', { class: 'hub-error', text: `Test chưa thành công · ${result.failure_kind} · ${result.message}` }));
+        }
+      } catch (err) { aiTestOutput.replaceChildren(h('p', { class: 'hub-error', text: err.message })); }
+      finally { button.disabled = false; button.textContent = 'Test nhanh model'; }
+    } });
+    const priorProbe = selectedModel === 'auto' ? aiModels.auto_probe : aiModels.models.find(m => m.id === selectedModel)?.probe;
+    if (priorProbe) aiTestOutput.replaceChildren(h('p', { class: priorProbe.state === 'ok' ? 'hub-ok' : 'ov-muted',
+      text: priorProbe.state === 'ok' ? `Test gần nhất thành công · ${priorProbe.latency_ms} ms` : `Kết quả test gần nhất: ${priorProbe.state}` }));
+    const aiForm = h('form', { class: 'hub-form', onsubmit: async e => {
+      e.preventDefault();
+      try {
+        const result = await api('POST', '/ai/config', { api_key: aiKey.value });
+        aiKey.value = '';
+        toast(aiMsg, result.available ? `Đã kết nối FreeLLMAPI · model ${result.model}. Tin sẽ được AI xử lý tự động.` : 'Đã lưu khóa nhưng FreeLLMAPI chưa sẵn sàng.', !result.available);
+        renderSources();
+      } catch (err) { toast(aiMsg, err.message, true); }
+    } },
+      h('h4', { text: 'AI tự động · FreeLLMAPI' }),
+      h('p', { class: aiStatus.available ? 'hub-ok' : 'hub-error', text: aiStatusText }),
+      h('p', { class: 'ov-muted', text: `Router: ${aiStatus.base_url || 'http://127.0.0.1:31415/v1'} · khóa được mã hóa bằng Windows DPAPI trên máy này, không đưa vào bản sao lưu.` }),
+      h('label', { class: 'hub-field' }, 'Lọc trạng thái API (log 7 ngày)', modelFilter),
+      h('label', { class: 'hub-field' }, `Model (${aiModels.models.length} model trong catalog)`, modelSelect),
+      aiTestButton, aiTestOutput,
+      aiModels.models.length ? h('p', { class: 'ov-muted', text: `Test nhanh chỉ gửi một request tối đa 24 token; câu trả lời hiện ngay bên dưới. Dùng bộ lọc “Test nhanh thành công” để xem model đã chạy được. Rate limit/lỗi tạm thời được giữ; model đã tắt, không quota hoặc lỗi định danh/model lặp lại bị loại (${aiModels.removed?.disabled || 0} đã tắt, ${aiModels.removed?.removed || 0} lỗi).` }) : null,
+      h('label', { class: 'hub-field' }, 'Unified API key', aiKey),
+      h('button', { class: 'hub-btn primary', type: 'submit', text: 'Kết nối AI' }), aiMsg);
     const settingsForm = h('form', { class: 'hub-form', onsubmit: async e => {
       e.preventDefault();
-      const payload = { schedule: { enabled: en.checked, time: time.value, timezone: tz.value.trim() },
+      const payload = { schedule: { enabled: en.checked, time: time.value, timezone: tz.value.trim(), ai_enabled: aiAuto.checked },
         weather: { name: wName.value.trim(), latitude: Number(wLat.value), longitude: Number(wLon.value), timezone: wTz.value.trim() },
         github: { topics: list(topics.value), per_topic_limit: Number(perTopic.value), release_checks: Number(releases.value), refresh_limit: Number(refresh.value) },
         max_requests_per_run: Number(maxReq.value), backup: { enabled: bEnabled.checked, keep: Number(bKeep.value) } };
@@ -301,6 +430,7 @@
     } },
       h('h4', { text: 'Lịch chạy tự động' }),
       h('label', { class: 'hub-check' }, en, ' Bật chạy mỗi ngày'),
+      h('label', { class: 'hub-check' }, aiAuto, ` AI tự xếp hạng tài nguyên mới/cập nhật bằng model đang chọn (${aiStatus.model || 'Auto'})`),
       h('div', { class: 'hub-grid2' }, h('label', { class: 'hub-field' }, 'Giờ chạy', time), h('label', { class: 'hub-field' }, 'Múi giờ (ví dụ Asia/Ho_Chi_Minh)', tz)),
       h('h4', { text: 'Sao lưu tự động' }),
       h('label', { class: 'hub-check' }, bEnabled, ' Tự sao lưu sau mỗi lần đồng bộ hằng ngày'),
@@ -325,6 +455,7 @@
       h('section', { class: 'hub-pane' }, h('h3', { text: 'Nguồn dữ liệu' }),
         h('p', { class: 'ov-muted', text: 'Chỉ dùng API/RSS công khai và chính thức. Không thu thập nội dung cần đăng nhập, không vượt CAPTCHA.' }),
         srcList, addForms, addMsg),
+      h('section', { class: 'hub-pane' }, aiForm),
       h('section', { class: 'hub-pane' }, settingsForm),
       h('section', { class: 'hub-pane' }, backupPanel()));
   }
@@ -409,7 +540,7 @@
       h('strong', { text: n.name }), h('span', { class: 'ov-muted', text: 'Ghi chú: ' + (n.snippet || '') }),
       h('button', { class: 'hub-linkbtn', type: 'button', text: 'Mở tài nguyên', onclick: () => { state.res.q = n.name; state.res.offset = 0; openIn('resources'); } })));
     return [
-      h('p', { class: 'ov-muted', text: `${r.total} kết quả cho “${r.query}”.` }),
+      h('p', { class: 'ov-muted', text: `${r.total} kết quả; đã được AI xếp theo độ liên quan tới “${r.query}”.` }),
       searchGroup('Tài nguyên', r.resources.length, res),
       searchGroup('Memory', r.memories.length, mems),
       searchGroup('Prompt', r.prompts.length, prompts),
@@ -420,14 +551,52 @@
     const input = h('input', { class: 'hub-input', type: 'search', maxlength: 100, value: state.searchQ,
       placeholder: 'Tìm trong tài nguyên, memory, prompt và ghi chú…', 'aria-label': 'Tìm kiếm chung' });
     const out = h('div', { class: 'hub-list', 'aria-live': 'polite' });
+    let evidence = [];
+    const askInput = h('input', { class: 'hub-input', maxlength: 500, placeholder: 'Hỏi về kết quả, ví dụ: mục nào phù hợp người mới?', 'aria-label': 'Câu hỏi cho AI' });
+    const askOut = h('div', { class: 'hub-ai-answer', 'aria-live': 'polite' });
+    const askBtn = h('button', { class: 'hub-btn primary', type: 'submit', text: 'Hỏi AI', disabled: true });
+    const askForm = h('form', { class: 'hub-row', onsubmit: async e => {
+      e.preventDefault();
+      if (!evidence.length || !askInput.value.trim()) return;
+      askBtn.disabled = true; askOut.replaceChildren(h('p', { class: 'ov-muted', text: 'AI đang đọc các kết quả liên quan…' }));
+      try {
+        const answer = await api('POST', '/ai/ask-library', { question: askInput.value.trim(), items: evidence });
+        askOut.replaceChildren(h('p', { text: answer.answer }), answer.sources?.length
+          ? h('small', { class: 'ov-muted', text: 'Căn cứ: ' + answer.sources.map(id => evidence.find(item => item.id === id)?.title || id).join(' · ') }) : null);
+      } catch (err) { askOut.replaceChildren(h('p', { class: 'hub-error', role: 'alert', text: err.message })); }
+      finally { askBtn.disabled = !evidence.length; }
+    } }, askInput, askBtn);
     const run = async () => {
       state.searchQ = input.value.trim();
-      if (state.searchQ.length < 2) { out.replaceChildren(h('p', { class: 'ov-muted', text: 'Nhập ít nhất 2 ký tự.' })); return; }
-      try { out.replaceChildren(...searchResults(await api('GET', '/search?q=' + encodeURIComponent(state.searchQ)))); }
+      if (state.searchQ.length < 2) { evidence = []; askBtn.disabled = true; out.replaceChildren(h('p', { class: 'ov-muted', text: 'Nhập ít nhất 2 ký tự.' })); return; }
+      try {
+        const results = await api('GET', '/search?q=' + encodeURIComponent(state.searchQ));
+        const candidates = [
+          ...results.resources.map(x => ({ ...x, type: 'resource', title: x.name, id: 'resource:' + x.id })),
+          ...results.memories.map(x => ({ ...x, type: 'memory', id: 'memory:' + x.id })),
+          ...results.prompts.map(x => ({ ...x, type: 'prompt', id: 'prompt:' + x.id })),
+          ...results.notes.map(x => ({ ...x, type: 'note', title: x.name, id: 'note:' + x.resource_id }))
+        ];
+        evidence = candidates.slice(0, 20).map(x => ({ id: x.id, type: x.type, title: x.title || x.name, snippet: x.snippet || x.description || '' }));
+        askBtn.disabled = !evidence.length;
+        if (candidates.length) {
+          try {
+            const ranked = await api('POST', '/ai/rank-search', { query: state.searchQ, items: candidates });
+            const order = new Map(ranked.ids.map((id, i) => [id, i]));
+            results.resources.sort((a, b) => (order.get('resource:' + a.id) ?? 999) - (order.get('resource:' + b.id) ?? 999));
+            results.memories.sort((a, b) => (order.get('memory:' + a.id) ?? 999) - (order.get('memory:' + b.id) ?? 999));
+            results.prompts.sort((a, b) => (order.get('prompt:' + a.id) ?? 999) - (order.get('prompt:' + b.id) ?? 999));
+            results.notes.sort((a, b) => (order.get('note:' + a.resource_id) ?? 999) - (order.get('note:' + b.resource_id) ?? 999));
+          } catch { /* AI hỏi đáp riêng báo lỗi; tìm kiếm từ khóa vẫn dùng được. */ }
+        }
+        askOut.replaceChildren();
+        out.replaceChildren(...searchResults(results));
+      }
       catch (err) { out.replaceChildren(h('p', { class: 'hub-error', text: err.message })); }
     };
     body().replaceChildren(h('section', { class: 'hub-pane' },
       h('form', { class: 'hub-row', onsubmit: e => { e.preventDefault(); run(); } }, input, h('button', { class: 'hub-btn primary', type: 'submit', text: 'Tìm' })),
+      h('section', { class: 'hub-ai-box' }, h('div', {}, h('h3', { text: 'Hỏi AI về thư viện' }), h('p', { class: 'ov-muted', text: 'AI trả lời dựa trên kết quả tìm kiếm hiện tại và nêu nguồn tham khảo.' })), askForm, askOut),
       out));
     if (state.searchQ.length >= 2) run();
   }
@@ -471,7 +640,7 @@
     const dash = $('hub-dash');
     if (!dash) return;
     try {
-      const [s, weather] = await Promise.all([api('GET', '/status'), weatherCard()]);
+      const [s, weather, aiStatus] = await Promise.all([api('GET', '/status'), weatherCard(), api('GET', '/ai/status', undefined, 4500).catch(() => ({ available: false, message: 'FreeLLMAPI chưa phản hồi. Có thể kiểm tra trong cài đặt AI.' }))]);
       const sch = s.scheduler || {};
       const lr = s.last_run;
       const nowStatus = s.sync_running ? 'Đang đồng bộ…' : (lr ? { ok: 'Thành công', partial: 'Một phần (có nguồn lỗi)', failed: 'Thất bại', empty: 'Không có nguồn bật', running: 'Đang chạy' }[lr.status] || lr.status : 'Chưa chạy lần nào');
@@ -479,16 +648,40 @@
       const events = s.events.filter(e => ['new', 'release', 'missing', 'archived', 'recovered'].includes(e.type)).slice(0, 10);
       const syncBtn = h('button', { class: 'hub-btn primary', type: 'button', disabled: s.sync_running, text: s.sync_running ? 'Đang chạy…' : 'Chạy ngay',
         onclick: async () => { try { await api('POST', '/sync'); renderDashboard(); } catch (err) { alert(err.message); } } });
+      const aiSettingsBtn = h('button', { class: 'hub-btn', type: 'button', text: aiStatus.available ? 'Cấu hình model AI' : 'Kết nối AI', onclick: () => {
+        document.querySelector('.view-btn[data-view="library"]')?.click();
+        setTimeout(() => document.querySelector('#lib-tabs [data-lib="sources"]')?.click(), 0);
+      } });
       dash.replaceChildren(
         weather,
         card('Đồng bộ', h('p', { class: 'hub-big', text: nowStatus }),
           s.sync_running ? h('div', { class: 'hub-progress', role: 'progressbar', 'aria-label': 'Đang đồng bộ' }) : null,
           h('p', { class: 'ov-muted', text: lr ? `Lần gần nhất: ${fmtDate(lr.finished || lr.started)} · trigger: ${lr.trigger === 'auto' ? 'tự động' : 'thủ công'} · yêu cầu GitHub: ${lr.stats?.github_requests ?? '–'}` : 'Chưa có lần đồng bộ nào.' }),
+          lr?.stats?.ai_review ? h('p', { class: lr.stats.ai_review.status === 'ok' ? 'hub-ok' : 'ov-muted', text: lr.stats.ai_review.status === 'ok'
+            ? `AI ${lr.stats.ai_review.model}: đã phân tích ${lr.stats.ai_review.analyzed} tài nguyên mới/cập nhật${lr.stats.ai_review.top?.length ? ` · nổi bật: ${lr.stats.ai_review.top.map(x => `${x.name} (${x.score})`).join(', ')}` : ''}`
+            : `AI tự động: ${lr.stats.ai_review.message || lr.stats.ai_review.status}` }) : null,
           syncBtn),
         card('Lịch tự động', h('p', { text: sch.enabled ? `Mỗi ngày lúc ${sch.time} (${sch.timezone})` : 'Đã tắt' }),
           h('p', { class: 'ov-muted', text: sch.enabled ? `Lần chạy tiếp theo: ${sch.next_run ? new Date(sch.next_run).toLocaleString('vi-VN') : '–'}` : '' }),
           sch.timezone_note ? h('p', { class: 'hub-warn', text: sch.timezone_note }) : null,
           h('p', { class: 'ov-muted', text: sch.limitation })),
+        card('AI đang dùng được ở đâu?',
+          h('p', { class: aiStatus.available ? 'hub-ok' : 'hub-warn', text: aiStatus.available ? `Đang kết nối · ${aiStatus.model || 'Auto'}` : aiStatus.message || 'Chưa kết nối FreeLLMAPI.' }),
+          h('ul', { class: 'hub-ai-uses' },
+            h('li', { text: 'Tin tức: tự tóm tắt xu hướng, điểm nóng và bài đáng đọc; tìm tin theo ý nghĩa.' }),
+            h('li', { text: 'Thư viện AI: tìm ngữ nghĩa, hỏi đáp có nguồn, chấm mức phù hợp của repo/skill.' }),
+            h('li', { text: 'Nguồn & cài đặt: bật phân tích AI tự động sau mỗi lần đồng bộ theo lịch.' }),
+            h('li', { text: 'Prompt Spider hiện là hoạt ảnh heuristic; không phải AI đang phân tích request.' })),
+          h('p', { class: 'ov-muted', text: sch.enabled && sch.ai_enabled ? 'Đang bật: AI tuyển chọn tài nguyên mới sau mỗi lần đồng bộ.' : 'Phân tích AI theo lịch đang tắt.' }),
+          h('div', { class: 'hub-row' },
+            h('button', { class: 'hub-btn', type: 'button', text: 'Mở bản tin AI', onclick: () => {
+              document.querySelector('.view-btn[data-view="news"]')?.click();
+              setTimeout(() => document.querySelector('#channel-tabs [data-channel="all"]')?.click(), 0);
+            } }),
+            h('button', { class: 'hub-btn', type: 'button', text: 'Hỏi AI thư viện', onclick: () => {
+              document.querySelector('.view-btn[data-view="library"]')?.click();
+              setTimeout(() => document.querySelector('#lib-tabs [data-lib="search"]')?.click(), 0);
+            } }), aiSettingsBtn)),
         card('Kho tài nguyên', h('p', { class: 'hub-big', text: fmtNum(s.counts.resources) }),
           h('p', { class: 'ov-muted', text: `${fmtNum(s.counts.repos)} repo · ${fmtNum(s.counts.skills)} skill · ${fmtNum(s.counts.toolkit)} toolkit · ${fmtNum(s.counts.articles)} bài viết` }),
           h('p', { class: 'ov-muted', text: `${fmtNum(s.counts.saved)} đã lưu · ${fmtNum(s.counts.memories)} memory · ${fmtNum(s.counts.prompts)} prompt` })),
@@ -519,4 +712,8 @@
   });
   observer.observe(document.body, { attributes: true, attributeFilter: ['data-view'] });
   window.addEventListener('dailyhub:imported', () => { if (document.body.dataset.view === 'library') openTab(); });
+  window.addEventListener('dailyhub:model-changed', () => {
+    state.aiResourceRanks.clear(); aiRankError = ''; aiRankRetryAfter = 0;
+    if (document.body.dataset.view === 'library' && state.tab === 'resources') renderResources();
+  });
 })();

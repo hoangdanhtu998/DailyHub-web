@@ -21,7 +21,7 @@ from .sources import (BudgetExhausted, GitHub, RateLimited, SourceError, fetch_f
 from .sources import canonical_url  # re-exported for convenience
 
 DEFAULT_SETTINGS = {
-    "schedule": {"enabled": True, "time": "07:00", "timezone": "Asia/Ho_Chi_Minh"},
+    "schedule": {"enabled": True, "time": "07:00", "timezone": "Asia/Ho_Chi_Minh", "ai_enabled": True},
     "github": {
         "topics": ["ai-agents", "llm", "mcp", "agent-skills", "rag", "local-llm", "context-engineering"],
         "topic_kinds": {},
@@ -253,6 +253,24 @@ def run_sync(trigger: str = "manual", *, sleep=None, token: str | None = None) -
         if gh.calls and gh.calls < budget:
             with store.tx() as c:
                 stats["refresh"] = _refresh_tracked(c, gh, gh_cfg["refresh_limit"], store.now_ms(), gh_cfg["release_checks"])
+        if trigger == "auto" and settings["schedule"].get("ai_enabled", True):
+            from . import ai
+            ai_status = ai.status()
+            if not ai_status["available"]:
+                stats["ai_review"] = {"status": "unavailable", "message": ai_status.get("message", "Chưa cấu hình AI.")}
+            else:
+                try:
+                    rows = store.query("""SELECT id, kind, name, description, topics, metrics, license, status
+                                          FROM resources WHERE last_seen>=? ORDER BY last_seen DESC LIMIT 12""", (started,))
+                    items = [{**row, "topics": json.loads(row["topics"] or "[]"),
+                              "metrics": json.loads(row["metrics"] or "{}")} for row in rows]
+                    ranked = ai.rank_resources(items)
+                    names = {row["id"]: row["name"] for row in items}
+                    stats["ai_review"] = {"status": "ok", "model": ai_status["model"], "analyzed": len(ranked),
+                                           "top": [{"name": names.get(row["id"], ""), "score": row["score"],
+                                                    "reason": row["reason"][:180]} for row in ranked[:3]]}
+                except Exception as err:  # noqa: BLE001 - AI failure must not invalidate a successful sync
+                    stats["ai_review"] = {"status": "error", "model": ai_status["model"], "message": str(err)[:200]}
         with store.tx() as c:
             c.execute("DELETE FROM events WHERE id NOT IN (SELECT id FROM events ORDER BY id DESC LIMIT 500)")
         stats["github_requests"] = gh.calls

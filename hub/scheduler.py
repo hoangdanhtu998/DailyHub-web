@@ -114,7 +114,8 @@ class Scheduler(threading.Thread):
         tz, note = resolve_timezone(sch["timezone"])
         nxt = next_run(settings, datetime.now(timezone.utc))
         return {
-            "enabled": bool(sch.get("enabled")), "time": sch["time"], "timezone": sch["timezone"],
+            "enabled": bool(sch.get("enabled")), "ai_enabled": bool(sch.get("ai_enabled", True)),
+            "time": sch["time"], "timezone": sch["timezone"],
             "timezone_note": note, "running": self.is_alive(),
             "next_run": nxt.isoformat(timespec="minutes") if nxt else None,
             "last_auto_run_date": store.get_meta("last_auto_run_date"),

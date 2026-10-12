@@ -11,7 +11,7 @@ import re
 import threading
 from datetime import datetime, timezone
 
-from . import pipeline, scheduler, store
+from . import ai, pipeline, scheduler, store
 from .normalize import clean_text, safe_url
 from .sources import SourceError
 
@@ -659,6 +659,8 @@ def validate_settings(new: dict) -> None:
         raise ApiError(400, "múi giờ không hợp lệ (ví dụ Asia/Ho_Chi_Minh)")
     if "enabled" in sch and not isinstance(sch["enabled"], bool):
         raise ApiError(400, "schedule.enabled phải là true/false")
+    if "ai_enabled" in sch and not isinstance(sch["ai_enabled"], bool):
+        raise ApiError(400, "schedule.ai_enabled phải là true/false")
     gh = new.get("github", {})
     if "topics" in gh:
         topics = _json_list(gh["topics"], 30, 40)
@@ -813,6 +815,129 @@ def route(method: str, pattern: str):
 
 @route("GET", "/status")
 def _r_status(q, b, p): return status()
+
+
+@route("GET", "/ai/status")
+def _r_ai_status(q, b, p): return ai.status()
+
+
+@route("GET", "/ai/models")
+def _r_ai_models(q, b, p):
+    try:
+        return ai.models()
+    except RuntimeError as err:
+        raise ApiError(503, str(err)) from None
+
+
+@route("POST", "/ai/test-model")
+def _r_ai_test_model(q, b, p):
+    model = b.get("model", "auto")
+    if not isinstance(model, str) or len(model) > 200:
+        raise ApiError(400, "model không hợp lệ")
+    try:
+        return ai.test_model(model)
+    except RuntimeError as err:
+        raise ApiError(400, str(err)) from None
+
+
+@route("POST", "/ai/model")
+def _r_ai_model(q, b, p):
+    try:
+        return ai.select_model(str(b.get("model", "")))
+    except RuntimeError as err:
+        raise ApiError(400, str(err)) from None
+
+
+@route("POST", "/ai/config")
+def _r_ai_config(q, b, p):
+    try:
+        return ai.configure(str(b.get("api_key", "")))
+    except RuntimeError as err:
+        raise ApiError(400, str(err)) from None
+
+
+@route("POST", "/ai/enrich-news")
+def _r_ai_enrich(q, b, p):
+    items = b.get("items")
+    if not isinstance(items, list) or len(items) > 30:
+        raise ApiError(400, "items phải là mảng gồm tối đa 30 tin")
+    watch_words = b.get("watch_words", [])
+    if not isinstance(watch_words, list) or len(watch_words) > 30:
+        raise ApiError(400, "watch_words phải có tối đa 30 từ khóa")
+    try:
+        return {"items": ai.enrich_news(items, watch_words)}
+    except RuntimeError as err:
+        raise ApiError(503, str(err)) from None
+
+
+@route("POST", "/ai/summarize-news")
+def _r_ai_summarize_news(q, b, p):
+    items = b.get("items")
+    if not isinstance(items, list) or len(items) > 30:
+        raise ApiError(400, "items phải là mảng gồm tối đa 30 tin")
+    try:
+        return ai.summarize_news(items)
+    except RuntimeError as err:
+        raise ApiError(503, str(err)) from None
+
+
+@route("POST", "/ai/translate")
+def _r_ai_translate(q, b, p):
+    texts = b.get("texts")
+    if not isinstance(texts, list) or len(texts) > 4:
+        raise ApiError(400, "texts phải là mảng gồm tối đa 4 đoạn")
+    try:
+        return {"translations": ai.translate(texts)}
+    except RuntimeError as err:
+        raise ApiError(503, str(err)) from None
+
+
+@route("POST", "/ai/search-news")
+def _r_ai_search_news(q, b, p):
+    items = b.get("items")
+    query = clean_text(b.get("query", ""), 120)
+    if not isinstance(items, list) or len(items) > 40 or len(query) < 2:
+        raise ApiError(400, "cần truy vấn từ 2 ký tự và tối đa 40 tin")
+    try:
+        return {"ids": ai.search_news(query, items)}
+    except RuntimeError as err:
+        raise ApiError(503, str(err)) from None
+
+
+@route("POST", "/ai/rank-resources")
+def _r_ai_rank_resources(q, b, p):
+    items = b.get("items")
+    if not isinstance(items, list) or len(items) > 40:
+        raise ApiError(400, "items phải là mảng gồm tối đa 40 tài nguyên")
+    try:
+        return {"items": ai.rank_resources(items)}
+    except RuntimeError as err:
+        raise ApiError(503, str(err)) from None
+
+
+@route("POST", "/ai/rank-search")
+def _r_ai_rank_search(q, b, p):
+    items = b.get("items")
+    query = clean_text(b.get("query", ""), 120)
+    if not isinstance(items, list) or len(items) > 40 or len(query) < 2:
+        raise ApiError(400, "cần truy vấn từ 2 ký tự và tối đa 40 kết quả")
+    try:
+        return {"ids": ai.rank_search_results(query, items)}
+    except RuntimeError as err:
+        raise ApiError(503, str(err)) from None
+
+
+@route("POST", "/ai/ask-library")
+def _r_ai_ask_library(q, b, p):
+    question, items = b.get("question"), b.get("items")
+    if not isinstance(question, str) or len(question) > 500:
+        raise ApiError(400, "câu hỏi không hợp lệ hoặc dài quá 500 ký tự")
+    if not isinstance(items, list) or len(items) > 20:
+        raise ApiError(400, "items phải là danh sách kết quả tìm kiếm, tối đa 20 mục")
+    try:
+        return ai.answer_library_question(question, items)
+    except RuntimeError as err:
+        raise ApiError(503, str(err)) from None
 
 
 @route("GET", "/resources")

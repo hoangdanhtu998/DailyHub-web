@@ -6,6 +6,54 @@ const K = { SEEN: 'dailyhub_seen_ids', SAVED: 'dailyhub_saved_items', HIDE: 'dai
 function safeUrl(u) {
   return typeof u === 'string' && /^https?:\/\//i.test(u) ? u.replace(/^http:/i, 'https:') : null;
 }
+function imageUrl(value, base) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  try { return safeUrl(new URL(value.trim(), base).href); } catch { return null; }
+}
+function srcsetImage(value, base) {
+  if (typeof value !== 'string') return null;
+  const candidates = value.split(',').map(part => {
+    const [url, size = ''] = part.trim().split(/\s+/, 2);
+    const amount = Number.parseFloat(size);
+    return { url, score: Number.isFinite(amount) ? amount : 0 };
+  }).filter(item => item.url).sort((a, b) => b.score - a.score);
+  return candidates.map(item => imageUrl(item.url, base)).find(Boolean) || null;
+}
+function extractRssImage(item, html, articleUrl, feedUrl) {
+  const candidates = [];
+  const add = (value, base = articleUrl) => {
+    if (typeof value === 'string') candidates.push(imageUrl(value, base));
+    else if (Array.isArray(value)) value.forEach(entry => add(entry, base));
+    else if (value && typeof value === 'object') {
+      for (const key of ['url', 'href', 'src', 'link']) if (value[key]) add(value[key], base);
+    }
+  };
+  for (const key of ['thumbnail', 'image', 'enclosure', 'media_thumbnail', 'media_content', 'media:thumbnail', 'media:content']) add(item[key]);
+  const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
+  for (const meta of doc.querySelectorAll('meta[property], meta[name]')) {
+    if (/^(og:image|twitter:image)$/i.test(meta.getAttribute('property') || meta.getAttribute('name') || '')) add(meta.getAttribute('content'));
+  }
+  for (const link of doc.querySelectorAll('link[rel="image_src"][href]')) add(link.getAttribute('href'));
+  for (const media of doc.querySelectorAll('img, source, video')) {
+    for (const key of ['src', 'data-src', 'data-lazy-src', 'data-original', 'data-original-src', 'data-url', 'poster']) add(media.getAttribute(key));
+    for (const key of ['srcset', 'data-srcset']) {
+      const best = srcsetImage(media.getAttribute(key), articleUrl);
+      if (best) candidates.push(best);
+    }
+  }
+  const absolute = candidates.find(Boolean);
+  if (absolute) return absolute;
+  for (const key of ['thumbnail', 'image', 'enclosure', 'media_thumbnail', 'media_content', 'media:thumbnail', 'media:content']) {
+    const value = item[key];
+    const entries = Array.isArray(value) ? value : [value];
+    for (const entry of entries) {
+      const url = typeof entry === 'string' ? entry : entry && (entry.url || entry.href || entry.src || entry.link);
+      const resolved = imageUrl(url, feedUrl);
+      if (resolved) return resolved;
+    }
+  }
+  return null;
+}
 
 const CHANNELS = {
   all: { title: 'Tổng hợp đầy đủ · Việt Nam, AI, lập trình & GitHub' },
@@ -36,6 +84,27 @@ const VN_SOURCES = [
   { name: 'VietnamNet', base: 'https://vietnamnet.vn/rss/', slugs: { '': 'tin-moi-nhat', 'the-thao': 'the-thao', 'cong-nghe': 'cong-nghe', 'kinh-doanh': 'kinh-doanh', 'giai-tri': 'giai-tri' } }
 ];
 const feedCache = new Map();
+const aiCache = new Map();
+const aiDigestCache = new Map();
+async function aiEnrichItems(items) {
+  const cacheId = item => `${item.id}|${watchWords.join('\u001f')}`;
+  const pending = items.filter(item => !aiCache.has(cacheId(item)));
+  for (let i = 0; i < pending.length; i += 30) {
+    const batch = pending.slice(i, i + 30);
+    const res = await fetch('/api/hub/ai/enrich-news', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-DailyHub': '1' },
+      body: JSON.stringify({ items: batch.map(({ id, title, summary, source }) => ({ id, title, summary, source })), watch_words: watchWords }), signal: AbortSignal.timeout(95000) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `AI không xử lý được tin (HTTP ${res.status})`);
+    for (const result of data.items || []) aiCache.set(`${result.id}|${watchWords.join('\u001f')}`, result);
+  }
+  return items.map(item => {
+    const ai = aiCache.get(cacheId(item));
+    if (!ai) throw new Error('AI chưa phân tích xong một số tin. Hãy thử tải lại.');
+    return { ...item, originalSummary: item.summary, summary: ai.summary_vi || item.summary, aiCategory: ai.category,
+      aiTags: ai.tags, aiWatchMatches: ai.watch_matches, relevance: ai.relevance, isDeal: ai.is_deal, discount: ai.discount_percent,
+      prices: { current: ai.current_price, old: ai.old_price } };
+  });
+}
 const IMAGE_THEMES = [
   { match: /ai|artificial intelligence|machine learning|llm|robot|openai|gemini|claude|trí tuệ nhân tạo|trí tuệ|mô hình ngôn ngữ/i, label: 'TRÍ TUỆ NHÂN TẠO', start: '#4f46e5', end: '#a855f7', icon: '✦' },
   { match: /github|mã nguồn|source code|repository|repo|developer|lập trình|phần mềm|software|programming|linux/i, label: 'CÔNG NGHỆ & LẬP TRÌNH', start: '#0284c7', end: '#14b8a6', icon: '</>' },
@@ -63,8 +132,8 @@ let seen = new Set(Array.isArray(readSeen) ? readSeen.filter(x => typeof x === '
 let saved = Array.isArray(readSaved) ? readSaved.filter(x => x && typeof x.id === 'string' && typeof x.title === 'string' && safeUrl(x.link)) : [];
 let watchWords = sanitizeWords(read(K.WATCH, []));
 let readStats = sanitizeStats(read(K.STATS, {}));
-const st = { ch: 'all', feedChannel: 'all', q: '', page: 1, items: [], pending: null, hide: read(K.HIDE, false), cache: new Map(), requestId: 0 };
-const els = { grid: $('news-grid'), title: $('current-channel-title'), counter: $('unread-counter'), status: $('status-message'), more: $('load-more-btn'), banner: $('new-news-banner'), count: $('new-count'), markAll: $('mark-all-read') };
+const st = { ch: 'all', feedChannel: 'all', q: '', aiSearch: null, aiSearchSeq: 0, page: 1, items: [], pending: null, hide: read(K.HIDE, false), cache: new Map(), requestId: 0 };
+const els = { grid: $('news-grid'), title: $('current-channel-title'), counter: $('unread-counter'), status: $('status-message'), more: $('load-more-btn'), banner: $('new-news-banner'), count: $('new-count'), markAll: $('mark-all-read'), aiDigest: $('ai-digest') };
 const dealTools = $('deals-tools');
 
 /* ===== Dữ liệu ===== */
@@ -89,9 +158,6 @@ async function fetchRSS(feed, name, category = '') {
   const result = data.items.map(it => {
     const link = safeUrl(it.link), t = Date.parse(String(it.pubDate).replace(' ', 'T') + 'Z');
     const html = `${it.content || ''} ${it.description || ''}`;
-    const m = html.match(/<img[^>]+(?:src|data-src|data-original)=["']([^"']+)/i);
-    const og = html.match(/<meta[^>]+(?:property|name)=["'](?:og:image|twitter:image)["'][^>]+content=["']([^"']+)/i)
-      || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["'](?:og:image|twitter:image)["']/i);
     const time = Number.isNaN(t) ? 0 : t;                      // thời gian lỗi = 0, không giả làm "vừa đăng"
     const excerpt = stripHtml(it.description || it.content || '').slice(0, 1600);
     const summary = /^(comments?|discuss)$/i.test(excerpt) ? '' : excerpt;
@@ -99,7 +165,7 @@ async function fetchRSS(feed, name, category = '') {
     const productLink = [...doc.querySelectorAll('a[href]')].map(a => safeUrl(a.href)).find(u => u && /(?:shopee|lazada|tiki|tiktok|cellphones|thegioididong|dienmayxanh|sendo)\./i.test(u));
     return { id: link, title: stripHtml(it.title), summary, link, source: name, sources: [name], categories: category ? [category] : [], time,
       buyLink: productLink || link,
-      image: safeUrl(it.thumbnail) || safeUrl(it.enclosure && it.enclosure.link) || safeUrl(m && m[1]) || safeUrl(og && og[1]),
+      image: extractRssImage(it, html, link, feed),
       badge: time && Date.now() - time < 3600000 ? 'MỚI' : null };
   }).filter(i => i.title && i.link);
   feedCache.set(cacheKey, { at: Date.now(), items: result });
@@ -115,25 +181,6 @@ async function fetchGitHub() {
     source: 'GitHub', categories: ['GitHub AI'], time: Date.parse(r.updated_at) || 0, image: r.owner.avatar_url || null, stars: r.stargazers_count, badge: null }));
 }
 
-function discountPercent(item) {
-  const text = `${item.title || ''} ${item.summary || ''}`;
-  const patterns = [/(?:giảm|sale|off|discount(?:ed)?|save|tiết\s*kiệm)\s*(?:đến|tới|up\s*to|[-:])?\s*(\d{1,2})\s*%/ig, /(?:−|-)\s*(\d{1,2})\s*%/g];
-  const values = [];
-  for (const re of patterns) { let m; while ((m = re.exec(text))) { const n = Number(m[1]); if (n > 0 && n <= 100) values.push(n); } }
-  return values.length ? Math.max(...values) : null;
-}
-
-function dealPriceText(item) {
-  const text = `${item.title || ''} ${item.summary || ''}`;
-  const matches = [...text.matchAll(/(?:\d{1,3}(?:[.,\s]\d{3})+|\d+(?:[.,]\d+)?)\s*(?:₫|đ|vnđ|vnd|usd|\$|k\b|triệu\b)/gi)]
-    .map(m => m[0].replace(/\s+/g, ' ').trim());
-  const unique = [...new Set(matches)];
-  if (unique.length >= 2 && /giá|price|sale|giảm|off|discount/i.test(text)) return { current: unique[0], old: unique[1] };
-  const current = text.match(/(?:giá\s*(?:hiện\s*tại|sale|deal)|now|sale\s*price)\s*[:：]?\s*((?:\d{1,3}(?:[.,\s]\d{3})+|\d+(?:[.,]\d+)?)\s*(?:₫|đ|vnđ|vnd|usd|\$|k\b|triệu\b))/i)?.[1];
-  const old = text.match(/(?:giá\s*(?:gốc|cũ|niêm\s*yết)|was|regular\s*price|list\s*price)\s*[:：]?\s*((?:\d{1,3}(?:[.,\s]\d{3})+|\d+(?:[.,]\d+)?)\s*(?:₫|đ|vnđ|vnd|usd|\$|k\b|triệu\b))/i)?.[1];
-  return { current: current || null, old: old || null };
-}
-
 async function fetchDeals() {
   const sources = [
     ['Mua Gì Giờ?', 'https://mgg.cx/feed.xml'],
@@ -142,8 +189,9 @@ async function fetchDeals() {
   const results = await runLimited(sources.map(([name, url]) => () => fetchRSS(url, name, 'Deal')));
   const active = results.filter(x => x.status === 'fulfilled');
   const rows = active.flatMap(x => x.value || []);
-  const deals = cluster(rows.map(item => ({ ...item, discount: discountPercent(item), prices: dealPriceText(item) }))
-    .filter(item => item.discount >= 20)
+  const analyzed = await aiEnrichItems(rows);
+  const deals = cluster(analyzed
+    .filter(item => item.isDeal && item.discount >= 20)
     .sort((a, b) => b.discount - a.discount || b.time - a.time));
   deals.feedStats = { loaded: active.length, total: sources.length };
   return deals;
@@ -191,7 +239,7 @@ function vietnamTasks(channel) {
 async function fetchChannel(ch) {
   if (ch === 'spider') return st.items;
   if (!CHANNELS[ch]) throw new Error('Kênh không hợp lệ');
-  if (ch === 'saved') return saved;
+  if (ch === 'saved') return aiEnrichItems(saved);
   if (ch === 'deals') {
     return fetchDeals();
   }
@@ -209,6 +257,7 @@ async function fetchChannel(ch) {
   // Một số nguồn lỗi và không có tin nào: báo lỗi thay vì hiển thị danh sách trống như thể không có gì mới.
   if (!items.length && ok.length < tasks.length) throw new Error(`chỉ ${ok.length}/${tasks.length} nguồn phản hồi và không có tin nào`);
   if (ch === 'all') items = balanceAllTopics(items);
+  if (ch !== 'saved') items = (await aiEnrichItems(items)).sort((a, b) => b.relevance - a.relevance || b.time - a.time);
   items.feedStats = { loaded: ok.length, total: tasks.length };
   return items;
 }
@@ -236,7 +285,7 @@ function shortExcerpt(text, limit = 360) {
 
 /* ===== Giao diện ===== */
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
-const plain = ({ id, title, summary, link, buyLink, prices, discount, source, time, image, stars, categories }) => ({ id, title, summary, link, buyLink, prices, discount, source, time, image, stars, categories });
+const plain = ({ id, title, summary, link, buyLink, prices, discount, source, time, image, stars, categories, aiCategory, aiTags, aiWatchMatches, relevance }) => ({ id, title, summary, link, buyLink, prices, discount, source, time, image, stars, categories, aiCategory, aiTags, aiWatchMatches, relevance });
 const EN_WORDS = /\b(the|and|for|with|from|after|before|this|that|says|said|new|how|why|what|when|will|has|have|its|their|you|your|into|over|under|about|more|than|could|would|should|ai|model|release|launch|update)\b/gi;
 function needsVietnamese(item) {
   const text = `${item.title || ''} ${item.summary || ''}`;
@@ -245,18 +294,17 @@ function needsVietnamese(item) {
   return (text.match(EN_WORDS) || []).length >= 2;
 }
 const translationCache = new Map();
-async function translateToVietnamese(text) {
-  const value = String(text || '').trim().slice(0, 900);
-  if (!value) return '';
-  if (translationCache.has(value)) return translationCache.get(value);
-  const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=vi&dt=t&q=' + encodeURIComponent(value);
-  const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
-  if (!res.ok) throw new Error(`Dịch lỗi HTTP ${res.status}`);
-  const data = await res.json();
-  const translated = Array.isArray(data?.[0]) ? data[0].map(row => row?.[0] || '').join('') : '';
-  if (!translated) throw new Error('Nguồn dịch không trả nội dung');
-  translationCache.set(value, translated);
-  return translated;
+async function translateToVietnamese(...texts) {
+  const values = texts.map(text => String(text || '').trim().slice(0, 1200));
+  if (values.every(value => !value)) return values.map(() => '');
+  if (values.every(value => !value || translationCache.has(value))) return values.map(value => value ? translationCache.get(value) : '');
+  const res = await fetch('/api/hub/ai/translate', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-DailyHub': '1' },
+    body: JSON.stringify({ texts: values.filter(Boolean) }), signal: AbortSignal.timeout(95000) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Dịch lỗi HTTP ${res.status}`);
+  let index = 0;
+  values.forEach(value => { if (value) translationCache.set(value, data.translations?.[index++] || ''); });
+  return values.map(value => value ? translationCache.get(value) : '');
 }
 function timeAgo(t) {
   if (!t) return '';
@@ -287,7 +335,7 @@ function card(it, featured) {
   if (it.badge) meta.appendChild(el('span', 'badge-new', it.badge));
   meta.appendChild(el('span', 'meta-source', it.source));
   if (it.also && it.also.size) meta.appendChild(el('span', 'tag-multi', '+' + it.also.size + ' nguồn'));
-  (it.categories || []).filter(x => x !== 'Tin Việt Nam').slice(0, 3).forEach(x => meta.appendChild(el('span', 'tag-category', x)));
+  [...new Set([it.aiCategory, ...(it.aiTags || []), ...(it.categories || []).filter(x => x !== 'Tin Việt Nam')].filter(Boolean))].slice(0, 4).forEach(x => meta.appendChild(el('span', 'tag-category', x)));
   watchMatches(it).slice(0, 2).forEach(w => meta.appendChild(el('span', 'tag-watch', '◉ ' + w)));
   if (it.stars) meta.appendChild(el('span', 'tag-stars', '★ ' + Number(it.stars).toLocaleString()));
   meta.appendChild(el('span', '', timeAgo(it.time)));
@@ -315,8 +363,7 @@ function card(it, featured) {
     button.onclick = async e => {
       e.preventDefault(); e.stopPropagation(); button.disabled = true; button.textContent = 'Đang dịch…';
       try {
-        const title = await translateToVietnamese(it.title);
-        const summary = it.summary ? await translateToVietnamese(it.summary) : '';
+        const [title, summary] = await translateToVietnamese(it.title, it.summary || '');
         result.replaceChildren(el('strong', '', 'Bản dịch tiếng Việt (tự động)'), el('p', '', title), ...(summary ? [el('p', '', summary)] : []));
         result.classList.remove('hidden'); button.textContent = 'Dịch lại';
       } catch (err) { button.textContent = 'Dịch không thành công · thử lại'; }
@@ -355,11 +402,73 @@ function showSeenButton() {
   return btn;
 }
 
+function renderAiDigest(items) {
+  const box = els.aiDigest;
+  if (!['all', 'ai'].includes(st.ch) || st.q || !Array.isArray(items) || !items.length) { box.hidden = true; box.replaceChildren(); return; }
+  const highlights = [...items].sort((a, b) => (b.relevance || 0) - (a.relevance || 0) || (b.time || 0) - (a.time || 0)).slice(0, 3);
+  const channel = st.ch;
+  const briefItems = [...items].sort((a, b) => (b.relevance || 0) - (a.relevance || 0) || (b.time || 0) - (a.time || 0)).slice(0, 30);
+  const cacheKey = `${channel}|${briefItems.map(item => `${item.id}:${(item.summary || '').slice(0, 100)}`).join('|')}`;
+  let brief = aiDigestCache.get(cacheKey);
+  if (!brief) {
+    if (aiDigestCache.size > 20) aiDigestCache.clear();
+    brief = { status: 'loading' }; aiDigestCache.set(cacheKey, brief);
+    fetch('/api/hub/ai/summarize-news', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-DailyHub': '1' },
+      body: JSON.stringify({ items: briefItems.map(item => ({ id: item.id, title: item.title, summary: item.summary, source: item.source,
+        category: item.aiCategory, relevance: item.relevance })) }), signal: AbortSignal.timeout(95000) })
+      .then(async res => { const result = await res.json().catch(() => ({})); if (!res.ok) throw new Error(result.error || `AI tổng hợp lỗi HTTP ${res.status}`); return result; })
+      .then(result => { aiDigestCache.set(cacheKey, { ...result, status: 'ok' }); if (st.ch === channel && st.items === items) renderAiDigest(items); })
+      .catch(err => { aiDigestCache.set(cacheKey, { status: 'error', message: err.message }); if (st.ch === channel && st.items === items) renderAiDigest(items); });
+  }
+  const heading = el('div', 'ai-digest-heading');
+  const title = el('div', 'ai-digest-title');
+  title.append(el('span', 'ai-digest-kicker', 'DAILYHUB AI BRIEF'), el('h2', '', st.ch === 'ai' ? 'Điểm nóng về AI' : 'Điểm đáng chú ý hôm nay'));
+  title.appendChild(el('p', 'ai-digest-subtitle', `AI đã đọc ${items.length} tin${st.items.feedStats ? ` từ ${st.items.feedStats.loaded} luồng tin` : ''}; bản tổng hợp dùng ${briefItems.length} bài nổi bật.`));
+  heading.append(title, el('span', 'ai-digest-count', `${items.length} TIN ĐÃ PHÂN TÍCH`));
+  const lead = el('div', 'ai-digest-lead');
+  if (brief.status === 'ok') {
+    lead.append(el('h3', 'ai-digest-headline', brief.headline), el('p', 'ai-digest-summary', brief.summary));
+    if (brief.themes?.length) {
+      const themes = el('div', 'ai-digest-themes');
+      themes.append(...brief.themes.map(theme => el('span', '', theme)));
+      lead.appendChild(themes);
+    }
+  } else {
+    lead.append(el('p', brief.status === 'error' ? 'ai-digest-summary ai-digest-error' : 'ai-digest-summary', brief.status === 'error'
+      ? `Chưa tạo được bản tổng hợp: ${brief.message}` : 'AI đang đọc các tin để tạo bản tổng hợp ngắn…'));
+    if (brief.status === 'error') {
+      const retry = el('button', 'ai-digest-retry', 'Thử tổng hợp lại');
+      retry.onclick = () => { aiDigestCache.delete(cacheKey); renderAiDigest(items); };
+      lead.appendChild(retry);
+    }
+  }
+  const list = el('div', 'ai-digest-highlights');
+  highlights.forEach((item, index) => {
+    const link = el('a', 'ai-highlight');
+    link.href = item.link; link.target = '_blank'; link.rel = 'noopener noreferrer';
+    link.addEventListener('click', () => { if (!seen.has(item.id)) { seen.add(item.id); seen = new Set([...seen].slice(-800)); write(K.SEEN, [...seen]); bumpStats(); counter(); } });
+    link.append(el('span', 'ai-highlight-rank', String(index + 1).padStart(2, '0')));
+    const copy = el('div', 'ai-highlight-copy');
+    copy.append(el('span', 'ai-highlight-category', item.aiCategory || (st.ch === 'ai' ? 'TRÍ TUỆ NHÂN TẠO' : 'TIN ĐÁNG CHÚ Ý')),
+      el('strong', 'ai-highlight-title', item.title), el('span', 'ai-highlight-summary', shortExcerpt(item.summary || '', 220)),
+      el('span', 'ai-highlight-source', `${item.source || 'Nguồn tin'} · ${timeAgo(item.time)}`));
+    const score = el('span', 'ai-highlight-score', String(item.relevance || 0));
+    score.appendChild(el('small', '', 'AI'));
+    link.append(copy, score);
+    list.appendChild(link);
+  });
+  box.replaceChildren(heading, lead, list); box.hidden = false;
+}
+
 function render() {
   let list = st.items;
   if (st.hide && st.ch !== 'saved') list = list.filter(i => !seen.has(i.id));
   if (st.watchOnly) list = list.filter(i => watchMatches(i).length > 0);
-  if (st.q) { const q = st.q.toLowerCase(); list = list.filter(i => (i.title + ' ' + i.source).toLowerCase().includes(q)); }
+  if (st.q) {
+    if (st.aiSearch?.query === st.q && Array.isArray(st.aiSearch.ids)) { const rank = new Map(st.aiSearch.ids.map((id, index) => [id, index])); list = list.filter(i => rank.has(i.id)).sort((a, b) => rank.get(a.id) - rank.get(b.id)); }
+    else list = [];
+  }
+  renderAiDigest(st.q ? [] : st.items);
   const shown = list.slice(0, st.page * PAGE);
   els.grid.replaceChildren(...shown.map((it, k) => {
     const node = card(it, k === 0 && !st.q && st.page === 1);
@@ -375,14 +484,19 @@ function render() {
     counter();
     return;
   }
-  const msg = list.length ? '' : (st.ch === 'deals' && st.items.feedStats?.loaded === 0
+  const msg = list.length ? '' : (st.q && st.aiSearch?.query === st.q && st.aiSearch.loading ? 'AI đang tìm tin phù hợp…'
+    : st.q && st.aiSearch?.query === st.q && st.aiSearch.error ? st.aiSearch.error
+    : st.ch === 'deals' && st.items.feedStats?.loaded === 0
     ? 'Các RSS deal chưa phản hồi. Thử lại sau, hoặc bấm liên kết Facebook để tìm bài/nhóm săn deal (cần đăng nhập).'
     : (st.watchOnly ? 'Chưa có tin nào khớp từ khóa theo dõi.' : (EMPTY[st.ch] || 'Không có nội dung phù hợp (hoặc bạn đã xem hết).')));
   els.status.textContent = msg; els.status.classList.remove('error'); els.status.classList.toggle('hidden', !msg);
   counter();
 }
 
+window.addEventListener('dailyhub:model-changed', () => { aiDigestCache.clear(); if (['all', 'ai'].includes(st.ch)) render(); });
+
 function skeleton() {
+  els.aiDigest.hidden = true;
   els.grid.replaceChildren(...Array.from({ length: 6 }, () => el('div', 'skeleton-card')));
   els.grid.setAttribute('aria-busy', 'true'); els.status.classList.add('hidden'); els.more.classList.add('hidden');
 }
@@ -406,6 +520,7 @@ async function loadChannel(ch, force = false) {
   } catch (e) {
     if (requestId !== st.requestId || ch !== st.ch) return;
     st.items = []; els.grid.replaceChildren(); els.grid.setAttribute('aria-busy', 'false');
+    els.aiDigest.hidden = true;
     els.status.textContent = 'Không tải được: ' + e.message + '.';
     els.status.classList.add('error'); els.status.classList.remove('hidden');
   }
@@ -448,6 +563,12 @@ function showView(ch) {
 /* ===== Sự kiện ===== */
 $('channel-tabs').addEventListener('click', e => {
   const b = e.target.closest('.channel-btn'); if (!b) return;
+  const isSpider = b.dataset.channel === 'spider';
+  document.body.dataset.view = isSpider ? 'spider' : 'news';
+  document.querySelectorAll('.view-tabs .view-btn').forEach(tab => {
+    const on = tab.dataset.view === document.body.dataset.view;
+    tab.classList.toggle('active', on); tab.setAttribute('aria-pressed', String(on));
+  });
   document.querySelectorAll('.channel-btn').forEach(x => {
     x.classList.toggle('active', x === b);
     x.setAttribute('aria-pressed', String(x === b));
@@ -462,12 +583,29 @@ const hideBtn = $('toggle-hide-seen'); hideBtn.setAttribute('aria-pressed', st.h
 hideBtn.onclick = () => { st.hide = !st.hide; write(K.HIDE, st.hide); hideBtn.setAttribute('aria-pressed', st.hide); render(); };
 
 let timer;
+async function runAiNewsSearch(query) {
+  const seq = ++st.aiSearchSeq;
+  st.aiSearch = { query, loading: true }; render();
+  try {
+    const items = st.items.slice(0, 40).map(({ id, title, summary, aiTags }) => ({ id, title, summary, tags: aiTags }));
+    const res = await fetch('/api/hub/ai/search-news', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-DailyHub': '1' },
+      body: JSON.stringify({ query, items }), signal: AbortSignal.timeout(95000) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `AI tìm kiếm lỗi HTTP ${res.status}`);
+    if (seq !== st.aiSearchSeq || query !== st.q) return;
+    st.aiSearch = { query, ids: data.ids || [], loading: false };
+  } catch (err) {
+    if (seq !== st.aiSearchSeq || query !== st.q) return;
+    st.aiSearch = { query, ids: [], loading: false, error: err.message };
+  }
+  render();
+}
 $('search-input').addEventListener('input', e => {
   $('clear-search').classList.toggle('hidden', !e.target.value);
   clearTimeout(timer);
-  timer = setTimeout(() => { st.q = e.target.value.trim(); st.page = 1; render(); }, 250);
+  timer = setTimeout(() => { st.q = e.target.value.trim(); st.page = 1; st.aiSearch = null; if (st.q.length >= 2) runAiNewsSearch(st.q); else if (st.q) { st.aiSearch = { query: st.q, error: 'Nhập ít nhất 2 ký tự để AI tìm kiếm.' }; render(); } else render(); }, 550);
 });
-$('clear-search').onclick = () => { $('search-input').value = ''; $('clear-search').classList.add('hidden'); st.q = ''; st.page = 1; render(); $('search-input').focus(); };
+$('clear-search').onclick = () => { $('search-input').value = ''; $('clear-search').classList.add('hidden'); st.q = ''; st.aiSearchSeq++; st.aiSearch = null; st.page = 1; render(); $('search-input').focus(); };
 els.more.onclick = () => { st.page++; render(); };
 els.markAll.onclick = () => {
   const list = st.items.filter(i => i && i.id && !seen.has(i.id));
@@ -517,8 +655,7 @@ function sanitizeWords(v) {
 }
 function watchMatches(item) {
   if (!watchWords.length) return [];
-  const text = `${item.title || ''} ${item.summary || ''}`.toLowerCase();
-  return watchWords.filter(w => text.includes(w.toLowerCase()));
+  return Array.isArray(item.aiWatchMatches) ? item.aiWatchMatches : [];
 }
 function renderWatch() {
   if (!watchWords.length) st.watchOnly = false;
@@ -526,7 +663,7 @@ function renderWatch() {
   watchWords.forEach((w, i) => {
     const chip = el('span', 'watch-chip', w);
     const rm = el('button', 'watch-remove', '×'); rm.type = 'button'; rm.setAttribute('aria-label', `Bỏ theo dõi ${w}`);
-    rm.onclick = () => { watchWords.splice(i, 1); write(K.WATCH, watchWords); renderWatch(); render(); };
+    rm.onclick = () => { watchWords.splice(i, 1); write(K.WATCH, watchWords); renderWatch(); loadChannel(st.ch, true); };
     chip.appendChild(rm); box.appendChild(chip);
   });
   const only = $('watch-only');
@@ -538,7 +675,7 @@ $('watch-form').onsubmit = e => {
   const input = $('watch-input'), w = input.value.trim().slice(0, 40);
   input.value = '';
   if (!w || watchWords.length >= 30 || watchWords.some(x => x.toLowerCase() === w.toLowerCase())) return;
-  watchWords.unshift(w); write(K.WATCH, watchWords); renderWatch(); render();
+  watchWords.unshift(w); write(K.WATCH, watchWords); renderWatch(); loadChannel(st.ch, true);
 };
 $('watch-only').onclick = () => { if (!watchWords.length) return; st.watchOnly = !st.watchOnly; renderWatch(); render(); };
 

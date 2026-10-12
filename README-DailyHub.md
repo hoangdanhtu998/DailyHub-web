@@ -1,17 +1,26 @@
 # DailyHub gộp tin Việt Nam, AI, Devs, GitHub và Prompt Spider
 
-1. Mở FreeLLMAPI Desktop nếu cần dùng Prompt Spider đồng bộ Analytics.
+1. Mở FreeLLMAPI Desktop để bật router AI cục bộ (mặc định `127.0.0.1:31415`).
 2. Chạy `Run-FreeLLMAPI-Spider.bat`.
 3. Mở `http://127.0.0.1:8766/index.html`.
 4. Trang mặc định vào **Tất cả tin**: gộp tin RSS Việt Nam theo nhiều chủ đề, AI, Devs & Tech, và repo GitHub AI mới nổi. Các tab riêng, tin đã lưu, ẩn tin đã xem, tìm kiếm và Prompt Spider vẫn có sẵn.
 
 RSS được tải từ các nguồn công khai; mỗi feed lỗi sẽ được bỏ qua và số feed hoạt động hiển thị cạnh bộ đếm. Dữ liệu được gộp để giảm bài trùng. Danh sách có phân trang và tự kiểm tra cập nhật định kỳ. Thẻ tin hiện trích đoạn RSS thật, không chỉ tiêu đề.
 
-Tab Deal lọc các bài từ RSS MGG.CX và Deal1K khi tiêu đề/trích đoạn nêu rõ mức giảm từ 20% trở lên. Hai nút Facebook mở tìm kiếm bài viết/nhóm trong Facebook. Tự động đọc bài trong trang/nhóm Facebook cần ứng dụng Meta, token và quyền API đã được cấp; DailyHub không giả lập kết quả Facebook.
+Tab Deal phân tích các bài từ RSS MGG.CX và Deal1K bằng AI, rồi chỉ hiện deal có bằng chứng giảm từ 20% trở lên. Hai nút Facebook mở tìm kiếm bài viết/nhóm trong Facebook. Tự động đọc bài trong trang/nhóm Facebook cần ứng dụng Meta, token và quyền API đã được cấp; DailyHub không giả lập kết quả Facebook.
 
-Thẻ tin tiếng Anh/ngoại ngữ có nút dịch tiêu đề và trích đoạn sang tiếng Việt, giữ nguyên bản gốc để đối chiếu. Deal hiển thị link sản phẩm và giá nếu RSS cung cấp; nếu chỉ có bài tổng hợp thì dẫn tới bài deal và ghi rõ, không tự bịa giá.
+Tin được FreeLLMAPI phân tích tự động: tóm tắt tiếng Việt, gắn chủ đề/từ khóa, chấm mức độ đáng đọc, dò từ khóa theo dõi theo ngữ nghĩa và tìm kiếm tin theo ý nghĩa. Kênh **Tất cả tin** và **Tin AI** có thêm bản tổng hợp ngắn do model tạo, chủ đề chính và ba bài nổi bật. Deal được model xác định từ nội dung RSS; phần trăm/giá không rõ được để trống, không đoán. Nút dịch gọi cùng model AI.
+
+## Kết nối AI
+
+- Mở FreeLLMAPI Desktop và sao chép unified API key từ khay hệ thống hoặc dashboard.
+- Trong DailyHub chọn **Thư viện AI → Nguồn & cài đặt**, dán key vào mục **AI tự động · FreeLLMAPI**, rồi bấm **Kết nối AI**.
+- Router mặc định `http://127.0.0.1:31415/v1`, model `auto`. Trong **Thư viện AI → Nguồn & cài đặt** có thể chọn model từ danh sách FreeLLMAPI hiện tại; `Auto` để router tự định tuyến qua các model/provider khả dụng. Khóa được mã hóa bằng Windows DPAPI trong thư mục dữ liệu cục bộ; không trả về giao diện và không nằm trong bản sao lưu.
+- Khi chưa kết nối được router/model, các kênh tin báo lỗi AI thay vì âm thầm chạy phân loại/tóm tắt bằng luật dự phòng. Tải RSS, lưu bài, đánh dấu đã đọc và điều hướng vẫn là thao tác ứng dụng thông thường.
 
 Prompt Spider kiểm tra event mới mỗi giây và chạy từng request thật sau khi FreeLLMAPI ghi log kết quả. Spider hiển thị model, trạng thái, số lần thử/lỗi, token và độ trễ; Analytics không lưu prompt của request API thông thường nên không có nội dung prompt để hiển thị. Số liệu tổng hợp làm mới mỗi hai giây.
+
+Prompt Spider nằm ngay cạnh **Tất cả tin** trên thanh kênh để dễ mở. Automation đồng bộ theo lịch dùng model AI đang chọn để xếp hạng tối đa 12 tài nguyên mới/cập nhật; bật/tắt tại **Thư viện AI → Nguồn & cài đặt**. Kết quả AI hiển thị trong lịch sử đồng bộ trên Tổng quan. Nếu AI lỗi hoặc chưa kết nối, lần đồng bộ vẫn hoàn tất và ghi trạng thái lỗi AI riêng.
 
 Bridge đọc cơ sở dữ liệu FreeLLMAPI ở chế độ chỉ đọc và chỉ lắng nghe trên `127.0.0.1`. Dừng máy chủ bằng Ctrl+C trong cửa sổ chạy batch.
 
@@ -99,7 +108,8 @@ Sự kiện được ghi lại: repo mới, release mới, repo bị xóa/không
 
 ## Quyền riêng tư và an toàn
 
-- Dữ liệu cá nhân chỉ nằm trên máy chạy server. Không có analytics hay telemetry.
+- Memory, prompt, ghi chú và khóa AI chỉ lưu cục bộ. Khi dùng AI, nội dung bài RSS, truy vấn tìm kiếm, từ khóa theo dõi và mô tả tài nguyên được chuyển qua FreeLLMAPI tới provider/model đã cấu hình.
+- Không có analytics hay telemetry của DailyHub.
 - Mọi ghi dữ liệu qua API cần header `X-DailyHub: 1` và Origin hợp lệ, nên trang web khác không thể ghi vào thư viện của bạn.
 - Log server không ghi query string (từ khóa tìm kiếm).
 - Body request tối đa 2 MB (sao lưu 20 MB). Số dòng và độ dài trường đều có giới hạn.

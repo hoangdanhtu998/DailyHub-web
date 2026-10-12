@@ -32,20 +32,21 @@
   function setView(view) {
     document.body.dataset.view = view;
     document.body.classList.toggle('view-overview', view === 'overview');  // giữ tương thích
-    document.querySelectorAll('.view-btn').forEach(b => {
+    document.querySelectorAll('.view-tabs .view-btn').forEach(b => {
       const on = b.dataset.view === view;
       b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on));
     });
     $('overview-view').hidden = view !== 'overview';
     $('library-view').hidden = view !== 'library';
-    if (view !== 'news') {
-      $('feed-view').hidden = true; $('spider-view').hidden = true;
-    }
+    $('feed-view').hidden = view !== 'news';
+    $('spider-view').hidden = view !== 'spider';
     if (view === 'overview') renderAll();
     if (view === 'news') {
       // Quay lại đúng kênh đang chọn; script.js sẽ tự hiển thị lại (dùng cache nếu có).
-      document.querySelector('#channel-tabs .channel-btn.active')?.click();
+      const active = document.querySelector('#channel-tabs .channel-btn.active');
+      (active?.dataset.channel === 'spider' ? document.querySelector('#channel-tabs [data-channel="all"]') : active)?.click();
     }
+    if (view === 'spider') document.querySelector('#channel-tabs [data-channel="spider"]')?.click();
   }
 
   /* ----- Đồng hồ ----- */
@@ -71,7 +72,8 @@
     let week = 0;
     for (let i = 0; i < 7; i++) { const d = new Date(); d.setDate(d.getDate() - i); week += (stats && stats[dayKey(d)]) || 0; }
     $('ov-read').textContent = (stats && stats[dayKey(today)]) || 0;
-    $('ov-read-sub').textContent = `${week} tin trong 7 ngày`;
+    $('ov-week-read').textContent = week;
+    $('ov-read-sub').textContent = 'Bài viết đã xem trong 7 ngày';
   }
 
   /* ----- Việc cần làm ----- */
@@ -150,7 +152,7 @@
   }
 
   /* ----- Khởi tạo ----- */
-  document.querySelectorAll('.view-btn').forEach(b => { b.onclick = () => setView(b.dataset.view); });
+  document.querySelectorAll('.view-tabs .view-btn').forEach(b => { b.onclick = () => setView(b.dataset.view); });
   $('ov-open-news').onclick = () => setView('news');
   setInterval(renderClock, 30000);
   document.addEventListener('dailyhub:imported', () => { data = normalize(read(KEY, null)); if (document.body.classList.contains('view-overview')) renderAll(); });
