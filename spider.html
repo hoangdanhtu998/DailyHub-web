@@ -81,7 +81,7 @@ h1 b{color:var(--code);animation:none}
 .card{position:relative;overflow:hidden;animation:statRise .6s cubic-bezier(.16,1,.3,1) both;transition:transform .25s,box-shadow .25s}
 .card:hover{transform:translateY(-2px);box-shadow:0 5px 14px rgba(49,55,44,.09)}
 .card::after{display:none}
-#c-code,#c-model,#c-you{box-shadow:none}
+#c-model,#c-status,#c-latency,#c-tokens{box-shadow:none}
 .live{position:relative;overflow:hidden;border-color:var(--line);box-shadow:0 5px 20px rgba(49,55,44,.06)}
 .live::before{display:none}
 .live-stat,.live-panel{transition:border-color .2s,box-shadow .2s}
@@ -107,9 +107,18 @@ header .sub{margin:3px 0 0;max-width:480px}
 #stage{height:max(480px,calc(100vh - 245px));min-height:480px;grid-template-columns:minmax(0,46%) minmax(0,1fr) 225px;border-radius:12px;background:#eceae3}
 #src{padding:clamp(13px,2vw,23px);font-size:clamp(13px,1.15vw,16px);line-height:2.1}
 #cards{gap:12px;padding:13px}
+#cards{grid-template-rows:repeat(5,minmax(0,1fr))}
 .card{padding:12px 13px;border-radius:9px}
 .card span{font-size:.73rem;font-weight:800;letter-spacing:.05em}
-.card b{font-size:clamp(2.1rem,4vw,3.2rem)}
+.card b{font-size:clamp(1.05rem,1.5vw,1.45rem);line-height:1.2;overflow-wrap:anywhere}
+#c-model{border-color:var(--code)}#c-model b,#c-model span{color:var(--code)}
+#c-status{border-color:var(--model)}#c-status b,#c-status span{color:var(--model)}
+#c-latency{border-color:var(--you)}#c-latency b,#c-latency span{color:var(--you)}
+#c-tokens{border-color:var(--pink)}#c-tokens b,#c-tokens span{color:var(--pink)}
+#c-savings{border-color:#527b67}#c-savings b,#c-savings span{color:#527b67}
+#latest-model{font-size:clamp(.8rem,1vw,1rem)}
+#c-status.state-ok{border-color:var(--code)}#c-status.state-ok b,#c-status.state-ok span{color:var(--code)}
+#c-status.state-bad{border-color:#b7473e}#c-status.state-bad b,#c-status.state-bad span{color:#b7473e}
 .session-brief{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(260px,1fr);gap:18px;align-items:center;margin:14px 0;padding:18px 20px;border:1px solid var(--line);border-radius:12px;background:var(--panel);box-shadow:0 5px 18px rgba(49,55,44,.05)}
 .brief-kicker{color:var(--code);font-size:.65rem;font-weight:800;letter-spacing:.16em}
 .session-brief h2{margin:4px 0;font-size:1rem;line-height:1.4}
@@ -138,16 +147,18 @@ header .sub{margin:3px 0 0;max-width:480px}
     <div id="top"><div>từ trong luồng<strong id="n-all">0</strong></div><div>đã quét<strong id="n-read">0</strong></div><div>theo luật<strong id="n-code" style="color:var(--code)">0</strong></div><div>cần ngữ cảnh<strong id="n-model" style="color:var(--model)">0</strong></div><div>cần xem xét<strong id="n-you" style="color:var(--you)">0</strong></div></div>
   </header>
   <div class="bar">
-    <button id="replay">Chạy lại luồng</button><button id="pause">Tạm dừng</button><label>tốc độ mô phỏng <input id="spd" type="range" min="30" max="400" value="390" aria-label="Tốc độ mô phỏng"></label><span id="msg"></span>
+    <button id="replay">Chạy lại luồng</button><button id="pause">Tạm dừng</button><label><input id="loop" type="checkbox" checked> Tự phát lại khi rảnh</label><label>tốc độ mô phỏng <input id="spd" type="range" min="30" max="400" value="390" aria-label="Tốc độ mô phỏng"></label><span id="msg"></span>
   </div>
 
   <div id="stage">
     <canvas id="cv"></canvas>
     <div id="srcwrap"><div class="tb"><i></i><i></i><i></i><span>studio.prompt</span><em id="ln">ln 1</em></div><div id="src" aria-label="Văn bản đang được đọc"></div></div><div></div>
     <div id="cards">
-      <div class="card" id="c-code"><span>→ THEO LUẬT</span><b>0</b><small>Heuristic demo · không phản ánh API route</small></div>
-      <div class="card" id="c-model"><span>→ CẦN NGỮ CẢNH</span><b>0</b><small>Phân loại minh họa · không gọi thêm model</small></div>
-      <div class="card" id="c-you"><span>→ CẦN XEM XÉT</span><b>0</b><small>Khớp danh sách từ khóa rủi ro minh họa</small></div>
+      <div class="card" id="c-model"><span>MODEL GẦN NHẤT</span><b id="latest-model">Đang tải…</b><small id="latest-provider">Nhà cung cấp: —</small></div>
+      <div class="card" id="c-status"><span>TRẠNG THÁI</span><b id="latest-status">—</b><small id="latest-attempts">Lượt thử: —</small></div>
+      <div class="card" id="c-latency"><span>ĐỘ TRỄ</span><b id="latest-latency">—</b><small>Thời gian hoàn tất request mới nhất</small></div>
+      <div class="card" id="c-tokens"><span>TOKEN VÀO / RA</span><b id="latest-tokens">—</b><small id="latest-token-detail">Tổng token của request mới nhất</small></div>
+      <div class="card" id="c-savings"><span>CHI PHÍ ƯỚC TÍNH ĐÃ TIẾT KIỆM</span><b id="latest-savings">—</b><small id="latest-savings-detail">Chỉ tính request thành công · khoảng đã chọn</small></div>
     </div>
   </div>
 
@@ -193,6 +204,7 @@ const $ = id => document.getElementById(id);
 const stage = $('stage'), src = $('src'), cv = $('cv'), ctx = cv.getContext('2d');
 let words = [], i = 0, timer = null, t0 = 0, cnt, hist, currentSource = 'Nội dung nhập tay', currentFacts = [];
 let liveQueue = [], liveBusy = false, liveRequestCursor = null, liveChatVersions = new Map();
+let lastLiveEvent = null, idleReplayTimer = null, idleReplayEligible = false;
 
 /* ===== PHÂN LOẠI: mọi con số tính từ văn bản, không random ===== */
 function analyse() {
@@ -247,6 +259,7 @@ function tick() {
     stop(); src.querySelector('.cur')?.classList.remove('cur'); hub = null; $('pause').textContent = 'Xong';
     if (liveBusy) liveBusy = false;
     if (liveQueue.length) setTimeout(runNextLiveEvent, 100);
+    else scheduleIdleReplay();
     return;
   }
   const w = words[i], c = w.c;
@@ -255,7 +268,6 @@ function tick() {
   const tgt = Math.max(0, w.el.offsetTop - src.clientHeight / 2); src.scrollTop += (tgt - src.scrollTop) * (RM ? 1 : 0.4);
   $('ln').textContent = 'ln ' + w.line + ' · ' + (i + 1) + '/' + words.length;
   cnt[c.route]++; hist.push(c.p); w.born = performance.now();
-  if (!RM) $('c-' + c.route).animate([{ boxShadow: '0 0 22px ' + COL[c.route] }, { boxShadow: '0 0 0 transparent' }], 380);
   $('dots').children[i].style.background = COL[c.route];
   spider(w);
   row(w);
@@ -384,7 +396,6 @@ function paint() {
     : 'Đang chờ request FreeLLMAPI mới…';
   ['code', 'model', 'you'].forEach(k => {
     $('n-' + k).textContent = cnt[k]; $('t-' + k).textContent = cnt[k];
-    $('c-' + k).querySelector('b').textContent = cnt[k];
     $('b-' + k).style.width = (cnt[k] / tot * 100) + '%';
   });
   $('session-detail').textContent = `Tạm tính trên ${nf.format(i)} từ đã quét: ${nf.format(cnt.code)} theo luật, ${nf.format(cnt.model)} cần ngữ cảnh, ${nf.format(cnt.you)} khớp từ khóa rủi ro. Đây là phân loại heuristic, không phải số liệu routing của API.`;
@@ -402,9 +413,10 @@ function paint() {
 }
 
 /* ===== DỮ LIỆU THẬT & ĐIỀU KHIỂN ===== */
-$('go').onclick = () => { const t = $('ta').value.trim(); if (t) build(t, 'Văn bản nhập thủ công', ['Nguồn: văn bản do bạn nhập']); else $('msg').textContent = 'Chưa có request mới hoặc nội dung để phân tích.'; };
-$('replay').onclick = () => { const t = $('ta').value.trim(); if (t) build(t, currentSource, currentFacts); else $('msg').textContent = 'Chưa có request mới để chạy lại.'; };
+$('go').onclick = () => { const t = $('ta').value.trim(); if (t) { idleReplayEligible = false; clearTimeout(idleReplayTimer); build(t, 'Văn bản nhập thủ công', ['Nguồn: văn bản do bạn nhập']); } else $('msg').textContent = 'Chưa có request mới hoặc nội dung để phân tích.'; };
+$('replay').onclick = () => { clearTimeout(idleReplayTimer); const t = $('ta').value.trim(); if (t) build(t, currentSource, currentFacts); else if (lastLiveEvent) runLiveEvent(lastLiveEvent); else $('msg').textContent = 'Chưa có request mới để chạy lại.'; };
 $('pause').onclick = () => { if (i >= words.length) return; if (timer) { stop(); $('pause').textContent = 'Tiếp tục'; } else { t0 = performance.now() - 0; timer = setInterval(tick, STEP); $('pause').textContent = 'Tạm dừng'; } };
+$('loop').onchange = () => { clearTimeout(idleReplayTimer); if ($('loop').checked && !timer && !liveQueue.length) scheduleIdleReplay(); };
 
 $('spd').oninput = e => { STEP = 430 - +e.target.value; if (timer) { clearInterval(timer); timer = setInterval(tick, STEP); } };
 $('msg').textContent = 'Đang chờ request FreeLLMAPI mới…';
@@ -458,6 +470,12 @@ function renderSnapshot(data) {
     topModel ? `model nhiều request nhất: ${topModel.display_name || topModel.model_id} (${asNum(topModel.requests)})` : ''
   ].filter(Boolean);
   $('snapshot-summary').replaceChildren(el('b', '', 'Tóm tắt từ snapshot thật'), el('span', '', facts.join(' · ')), el('small', '', 'Tóm tắt quy tắc, không do AI suy đoán.'));
+  const savings = data.estimatedCostSavings;
+  $('latest-savings').textContent = savings == null ? 'Chưa có giá' : new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(savings);
+  $('latest-savings-detail').textContent = savings == null
+    ? 'Cơ sở dữ liệu FreeLLMAPI chưa có bảng giá model'
+    : `Quy đổi token thành công sang giá API trả phí · ${rangeLabel}`;
+  renderLatestRequest((data.recentCalls || [])[0]);
   const stats = $('live-stats'); stats.replaceChildren(
     stat('Tổng request', asNum(data.requests)),
     stat('Tỷ lệ request thành công', `${Number(data.successRate || 0).toFixed(1)}%`, 'ok'),
@@ -465,6 +483,7 @@ function renderSnapshot(data) {
     stat('Lượt thử ở provider bị lỗi', asNum(data.failedAttempts), 'fail'),
     stat('Token đầu vào', asNum(data.inputTokens)),
     stat('Token đầu ra', asNum(data.outputTokens)),
+    stat('Chi phí ước tính đã tiết kiệm', savings == null ? 'Chưa có giá' : new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(savings), 'ok'),
     stat('Độ trễ trung bình', asMs(data.avgLatencyMs)),
     stat('Độ trễ P95', asMs(data.p95LatencyMs)),
     stat('Thời gian tới token đầu (TTFT)', asMs(data.avgTtfbMs)),
@@ -484,6 +503,37 @@ function renderSnapshot(data) {
     ...Object.entries(data.errorsByCategory || {}).map(([name, count]) => [name, asNum(count)]),
     ...Object.entries(data.errorsByProvider || {}).map(([name, count]) => [`Provider · ${name}`, asNum(count)])
   ]);
+}
+
+function renderLatestRequest(request) {
+  if (!request) {
+    $('latest-model').textContent = 'Chưa có dữ liệu';
+    $('latest-provider').textContent = 'Nhà cung cấp: —';
+    $('latest-status').textContent = '—';
+    $('latest-attempts').textContent = 'Lượt thử: —';
+    $('latest-latency').textContent = '—';
+    $('latest-tokens').textContent = '—';
+    $('latest-token-detail').textContent = 'Chưa có request trong khoảng này';
+    return;
+  }
+  const status = String(request.status || 'unknown');
+  const attempts = Number(request.attempts || 0);
+  const failedAttempts = Number(request.failed_attempts || 0);
+  const inputTokens = Number(request.input_tokens || 0);
+  const outputTokens = Number(request.output_tokens || 0);
+  const latencyMs = Number(request.latency_ms || 0);
+  const compact = n => n >= 1000000 ? `${(n / 1000000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : asNum(n);
+  $('latest-model').textContent = request.model_id || 'Model không rõ';
+  $('latest-provider').textContent = `Nhà cung cấp: ${request.platform || 'không rõ'}`;
+  $('latest-status').textContent = status.toUpperCase();
+  $('latest-attempts').textContent = `Lượt thử: ${attempts || '—'} · lỗi provider: ${failedAttempts}`;
+  $('latest-latency').textContent = latencyMs >= 1000 ? `${(latencyMs / 1000).toFixed(1)} giây` : `${asNum(latencyMs)} ms`;
+  $('latest-tokens').textContent = `${compact(inputTokens)} → ${compact(outputTokens)}`;
+  $('latest-token-detail').textContent = `${asNum(inputTokens)} vào · ${asNum(outputTokens)} ra`;
+  const statusCard = $('c-status');
+  const normalizedStatus = status.toLowerCase();
+  statusCard.classList.toggle('state-ok', ['success', 'succeeded', 'completed', 'ok'].includes(normalizedStatus));
+  statusCard.classList.toggle('state-bad', ['error', 'failed', 'canceled', 'cancelled'].includes(normalizedStatus));
 }
 
 function showChats(chats) {
@@ -506,9 +556,26 @@ function showChats(chats) {
 function runNextLiveEvent() {
   if (liveBusy || timer || !liveQueue.length) return;
   const event = liveQueue.shift(); liveBusy = true;
+  runLiveEvent(event);
+}
+
+function runLiveEvent(event) {
+  lastLiveEvent = event;
+  idleReplayEligible = true;
+  liveBusy = true;
   $('msg').textContent = event.label;
   $('ta').value = event.text;
   build(event.text.slice(0, 20000), event.label, event.facts);
+}
+
+function scheduleIdleReplay() {
+  clearTimeout(idleReplayTimer);
+  if (!$('loop').checked || !idleReplayEligible || !lastLiveEvent || liveQueue.length || liveBusy) return;
+  $('msg').textContent = 'Đang phát lại luồng gần nhất · chờ request mới';
+  idleReplayTimer = setTimeout(() => {
+    if (!$('loop').checked || liveQueue.length || liveBusy || timer) return;
+    runLiveEvent(lastLiveEvent);
+  }, 1800);
 }
 
 function queueLiveEvent(label, text, facts = []) {
@@ -605,3 +672,4 @@ setInterval(pollNewRequests, 1000);
 </script>
 </body>
 </html>
+
