@@ -38,9 +38,11 @@
     });
     $('overview-view').hidden = view !== 'overview';
     $('library-view').hidden = view !== 'library';
+    $('ai-workbench-view').hidden = view !== 'ai';
     $('feed-view').hidden = view !== 'news';
     $('spider-view').hidden = view !== 'spider';
     if (view === 'overview') renderAll();
+    if (view === 'ai') window.dispatchEvent(new Event('dailyhub:refresh-source-note'));
     if (view === 'news') {
       // Quay lại đúng kênh đang chọn; script.js sẽ tự hiển thị lại (dùng cache nếu có).
       const active = document.querySelector('#channel-tabs .channel-btn.active');
@@ -96,12 +98,22 @@
     });
     renderTodoCount();
   }
+  const todoPreset = $('ov-todo-preset');
+  const todoInput = $('ov-todo-input');
+  todoPreset.onchange = () => {
+    if (todoPreset.value === 'custom') {
+      todoInput.hidden = false;
+      todoInput.focus();
+      return;
+    }
+    if (todoPreset.value) $('ov-todo-form').requestSubmit();
+  };
   $('ov-todo-form').onsubmit = e => {
     e.preventDefault();
-    const input = $('ov-todo-input'), text = input.value.trim().slice(0, 200);
+    const text = (todoPreset.value === 'custom' ? todoInput.value : todoPreset.value).trim().slice(0, 200);
     if (!text || data.todos.length >= 200) return;
     data.todos.unshift({ id: uid(), text, done: false });
-    input.value = ''; saveNow(); renderTodos();
+    todoPreset.value = ''; todoInput.value = ''; todoInput.hidden = true; saveNow(); renderTodos();
   };
 
   /* ----- Ghi chú nhanh ----- */

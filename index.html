@@ -36,6 +36,7 @@
       <button class="view-btn" type="button" data-view="spider" aria-pressed="false">Prompt Spider</button>
       <button class="view-btn" type="button" data-view="overview" aria-pressed="false">Tổng quan</button>
       <button class="view-btn" type="button" data-view="library" aria-pressed="false">Thư viện AI</button>
+      <button class="view-btn ai-workbench-tab" type="button" data-view="ai" aria-pressed="false">AI xử lý</button>
     </nav>
     <nav class="nav-channels container" aria-label="Kênh nội dung">
       <div id="channel-tabs" class="channel-scroll">
@@ -117,9 +118,21 @@
       <div class="overview-workspace">
         <article class="overview-panel overview-todos">
           <div class="overview-panel-head"><div><span class="overview-panel-icon">☑</span><h3>Việc cần làm</h3></div><p id="ov-todo-count" class="overview-stat-note"></p></div>
-          <form id="ov-todo-form" class="ov-row overview-todo-form" autocomplete="off">
-            <input id="ov-todo-input" type="text" maxlength="200" placeholder="Thêm việc cần làm" aria-label="Việc cần làm mới">
+          <form id="ov-todo-form" class="overview-todo-form" autocomplete="off">
+            <div class="overview-todo-add-row">
+            <select id="ov-todo-preset" aria-label="Chọn việc cần làm có sẵn">
+              <option value="">Chọn việc cần làm…</option>
+              <option>Đọc tin AI nổi bật</option>
+              <option>Đọc tin công nghệ Việt Nam</option>
+              <option>Kiểm tra model AI</option>
+              <option>Đồng bộ thư viện AI</option>
+              <option>Lưu prompt hữu ích</option>
+              <option>Ghi lại ý tưởng mới</option>
+              <option value="custom">Nhập việc khác…</option>
+            </select>
             <button class="btn-secondary" type="submit" aria-label="Thêm việc">+</button>
+            </div>
+            <input id="ov-todo-input" type="text" maxlength="200" placeholder="Nhập việc của bạn" aria-label="Việc cần làm mới" hidden>
           </form>
           <ul id="ov-todos" class="ov-list"></ul>
         </article>
@@ -141,6 +154,61 @@
       <nav id="lib-tabs" class="lib-tabs" aria-label="Mục trong Thư viện AI"></nav>
       <div id="lib-body" class="lib-body"></div>
       <p class="ov-muted hub-privacy">Memory, prompt và ghi chú lưu trên máy chủ. Khi xử lý AI, nội dung tin, truy vấn tìm kiếm, từ khóa theo dõi và mô tả tài nguyên được gửi qua FreeLLMAPI tới nhà cung cấp model bạn cấu hình. Khóa API được giữ ở máy chủ.</p>
+    </section>
+
+    <section id="ai-workbench-view" hidden aria-label="AI xử lý nhanh">
+      <header class="ai-workbench-hero">
+        <span class="overview-eyebrow">DAILYHUB · AI THEO LỰA CHỌN CỦA BẠN</span>
+        <h2>Bạn muốn AI xử lý việc gì?</h2>
+        <p>Chọn một tác vụ và nguồn nội dung. DailyHub sẽ gửi yêu cầu đến FreeLLMAPI và hiển thị kết quả ngay tại đây.</p>
+      </header>
+      <div class="ai-workbench-panel">
+        <div class="ai-workbench-grid">
+          <label>Tác vụ
+            <select id="ai-quick-action">
+              <option value="summary">Tóm tắt thành 3 ý</option>
+              <option value="explain">Giải thích dễ hiểu</option>
+              <option value="pros_cons">Nêu lợi ích và rủi ro</option>
+              <option value="next_steps">Gợi ý bước tiếp theo</option>
+              <option value="translate">Dịch sang tiếng Việt</option>
+              <option value="checklist">Tạo checklist thực hiện</option>
+            </select>
+          </label>
+          <label>Giải thích cho
+            <select id="ai-quick-audience">
+              <option value="general">Người đọc phổ thông</option>
+              <option value="beginner">Người mới bắt đầu</option>
+              <option value="developer">Lập trình viên</option>
+              <option value="student">Học sinh / sinh viên</option>
+            </select>
+          </label>
+          <label>Nguồn nội dung
+            <select id="ai-quick-source">
+              <option value="ai">Tin AI và mô hình</option>
+              <option value="channel">Tin trong kênh đang xem</option>
+              <option value="top">3 tin nổi bật nhất</option>
+              <option value="watch">Tin khớp từ khóa tôi theo dõi</option>
+              <option value="saved">Bài tôi đã lưu</option>
+              <option value="custom">Tôi nhập nội dung</option>
+            </select>
+          </label>
+        </div>
+        <p id="ai-quick-source-note" class="ai-workbench-note">AI sẽ dùng tin ở kênh Tin tức bạn vừa xem.</p>
+        <textarea id="ai-quick-input" rows="7" maxlength="12000" placeholder="Dán bài viết, câu hỏi hoặc nội dung bạn muốn AI xử lý…" hidden></textarea>
+        <div class="ai-workbench-actions">
+          <button id="ai-quick-run" type="button" class="hub-btn primary">✦ Xử lý bằng AI</button>
+          <span id="ai-quick-status" class="ai-workbench-note" role="status">Sẵn sàng</span>
+        </div>
+        <section id="ai-quick-result" class="ai-workbench-result" aria-live="polite" hidden>
+          <div class="ai-workbench-result-head"><h3>Kết quả AI</h3><span id="ai-quick-meta"></span></div>
+          <div id="ai-quick-answer"></div>
+        </section>
+      </div>
+      <div class="ai-workbench-examples">
+        <h3 id="ai-quick-suggest-title">Gợi ý dành cho bạn</h3>
+        <p id="ai-quick-personal-note" class="ai-workbench-note"></p>
+        <div id="ai-quick-suggestions"></div>
+      </div>
     </section>
 
     <section id="spider-view" hidden>

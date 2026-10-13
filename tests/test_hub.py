@@ -11,6 +11,7 @@ import tempfile
 import threading
 import unittest
 import urllib.request
+from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -201,6 +202,22 @@ class TestFeeds(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(delays, [1, 2])
         FAKE_STATE["fail503"] = 0
+
+    def test_bypasses_unavailable_loopback_sink_proxy(self):
+        class Response:
+            status = 200
+            headers = {}
+            def __enter__(self): return self
+            def __exit__(self, *_args): return None
+            def read(self, _limit): return b'{"ok":true}'
+
+        with patch("hub.sources.urllib.request.getproxies", return_value={"https": "http://127.0.0.1:9"}), \
+             patch("hub.sources._DIRECT_OPENER.open", return_value=Response()) as direct_open, \
+             patch("hub.sources.urllib.request.urlopen", side_effect=urllib.error.URLError("proxy unavailable")):
+            status, _headers, body = http_get("https://api.github.com/zen", retries=0)
+        self.assertEqual(status, 200)
+        self.assertEqual(body, b'{"ok":true}')
+        direct_open.assert_called_once()
 
 
 class TestPipeline(unittest.TestCase):
@@ -513,6 +530,13 @@ class TestScheduler(unittest.TestCase):
             api.put_settings({"schedule": {"time": "25:99"}})
         with self.assertRaises(api.ApiError):
             api.put_settings({"schedule": {"timezone": "Mars/Olympus"}})
+
+    def test_fixed_timezone_fallbacks_match_supported_choices_without_warning(self):
+        for zone, hours in (("Asia/Ho_Chi_Minh", 7), ("Asia/Bangkok", 7), ("Asia/Tokyo", 9), ("Asia/Singapore", 8), ("UTC", 0)):
+            with self.subTest(zone=zone):
+                tz, note = scheduler.resolve_timezone(zone)
+                self.assertEqual(datetime(2026, 1, 1, tzinfo=tz).utcoffset(), timedelta(hours=hours))
+                self.assertEqual(note, "")
 
 
 class TestApi(unittest.TestCase):

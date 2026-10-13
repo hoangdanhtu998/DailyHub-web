@@ -19,7 +19,13 @@ except ImportError:  # pragma: no cover
     ZoneInfo = None
     ZoneInfoNotFoundError = Exception
 
-FIXED_OFFSETS = {"Asia/Ho_Chi_Minh": timezone(timedelta(hours=7)), "UTC": timezone.utc}
+FIXED_OFFSETS = {
+    "Asia/Ho_Chi_Minh": timezone(timedelta(hours=7)),
+    "Asia/Bangkok": timezone(timedelta(hours=7)),
+    "Asia/Tokyo": timezone(timedelta(hours=9)),
+    "Asia/Singapore": timezone(timedelta(hours=8)),
+    "UTC": timezone.utc,
+}
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 
 
@@ -31,7 +37,9 @@ def resolve_timezone(name: str) -> tuple[timezone, str]:
         except (ZoneInfoNotFoundError, ValueError, OSError):
             pass
     if name in FIXED_OFFSETS:
-        return FIXED_OFFSETS[name], "Không tìm thấy dữ liệu múi giờ hệ thống; dùng múi giờ cố định. Chạy 'pip install tzdata' để chính xác hơn."
+        # These zones currently use fixed offsets without seasonal DST changes.
+        # The fallback is accurate for scheduling on Windows without tzdata.
+        return FIXED_OFFSETS[name], ""
     return timezone.utc, f"Múi giờ '{name}' không xác định được; đang dùng UTC."
 
 

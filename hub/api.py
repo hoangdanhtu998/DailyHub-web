@@ -10,14 +10,17 @@ import json
 import re
 import threading
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 from . import ai, pipeline, scheduler, store
 from .normalize import clean_text, safe_url
-from .sources import SourceError
+from .sources import SourceError, fetch_article_image, fetch_feed
 
 MEMORY_KINDS = {"fact", "preference", "process", "decision", "lesson", "note"}
 CONFIDENCE = {"low", "medium", "high"}
 RESOURCE_KINDS = {"repo", "skill", "toolkit", "article"}
+_ARTICLE_IMAGE_CACHE: dict[str, tuple[float, str | None]] = {}
+_ARTICLE_IMAGE_LOCK = threading.Lock()
 SORTS = {
     "score": "COALESCE(r.score, -1) DESC, r.last_seen DESC",
     "updated": "r.last_updated DESC, r.last_seen DESC",
@@ -892,6 +895,19 @@ def _r_ai_translate(q, b, p):
         raise ApiError(503, str(err)) from None
 
 
+@route("POST", "/ai/quick")
+def _r_ai_quick(q, b, p):
+    action = b.get("action", "summary")
+    audience = b.get("audience", "general")
+    text = b.get("text", "")
+    if not isinstance(action, str) or not isinstance(audience, str) or not isinstance(text, str) or len(text) > 12000:
+        raise ApiError(400, "lựa chọn hoặc nội dung không hợp lệ")
+    try:
+        return ai.quick_action(action, audience, text)
+    except RuntimeError as err:
+        raise ApiError(503, str(err)) from None
+
+
 @route("POST", "/ai/search-news")
 def _r_ai_search_news(q, b, p):
     items = b.get("items")
@@ -1058,6 +1074,46 @@ def _r_backup_delete(q, b, p): return backups_delete(p["name"])
 
 @route("GET", "/weather")
 def _r_weather(q, b, p): return weather_view()
+
+
+@route("GET", "/feed")
+def _r_feed(q, b, p):
+    url = q.get("url", [""])[0]
+    name = clean_text(q.get("name", [""])[0], 80) or "RSS"
+    if urlparse(url).hostname not in {"vnexpress.net", "tuoitre.vn", "thanhnien.vn", "dantri.com.vn", "vietnamnet.vn",
+                                      "techcrunch.com", "theverge.com", "dev.to", "news.ycombinator.com",
+                                      "mgg.cx", "deal1k.vn"}:
+        raise ApiError(400, "nguồn RSS chưa được cho phép")
+    if len(url) > 2048:
+        raise ApiError(400, "URL nguồn quá dài")
+    if not safe_url(url):
+        raise ApiError(400, "URL nguồn không hợp lệ")
+    try:
+        items = fetch_feed(url, source_id="browser-feed", source_name=name, retries=1, backoff=0.5)
+    except SourceError as err:
+        raise ApiError(502, str(err)) from None
+    return {"items": items}
+
+
+@route("GET", "/article-image")
+def _r_article_image(q, b, p):
+    url = q.get("url", [""])[0]
+    if not isinstance(url, str) or len(url) > 2048:
+        raise ApiError(400, "URL bài viết không hợp lệ")
+    now = datetime.now(timezone.utc).timestamp()
+    with _ARTICLE_IMAGE_LOCK:
+        cached = _ARTICLE_IMAGE_CACHE.get(url)
+        if cached and cached[0] > now:
+            return {"image": cached[1]}
+    try:
+        image = fetch_article_image(url)
+    except SourceError as err:
+        raise ApiError(400, str(err)) from None
+    with _ARTICLE_IMAGE_LOCK:
+        if len(_ARTICLE_IMAGE_CACHE) > 600:
+            _ARTICLE_IMAGE_CACHE.clear()
+        _ARTICLE_IMAGE_CACHE[url] = (now + (6 * 3600 if image else 20 * 60), image)
+    return {"image": image}
 
 
 @route("GET", "/settings")

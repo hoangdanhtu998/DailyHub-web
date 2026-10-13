@@ -1,5 +1,5 @@
 /* Service worker: cache vỏ ứng dụng (network-first, dự phòng khi mất mạng). Không cache dữ liệu API hay RSS. */
-const CACHE = 'dailyhub-shell-v19';
+const CACHE = 'dailyhub-shell-v23';
 const SHELL = ['./', 'index.html', 'style.css', 'script.js', 'overview.js', 'library.js', 'spider.html', 'manifest.json', 'icon.svg'];
 
 self.addEventListener('install', e => {

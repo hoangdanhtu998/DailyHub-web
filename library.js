@@ -160,6 +160,13 @@
 
   /* ---------- Prompt Library ---------- */
   function promptForm(p) {
+    const promptTemplates = {
+      summary: { title: 'Tóm tắt bài viết', goal: 'Rút ra ý chính ngắn gọn, dễ hiểu', body: 'Tóm tắt nội dung sau bằng tiếng Việt. Nêu ý chính, các dữ kiện quan trọng và điều người đọc cần nhớ. Không thêm thông tin không có trong văn bản.\n\n{{text}}', variables: ['text'], tags: ['tóm tắt', 'đọc hiểu'] },
+      news: { title: 'Phân tích tin tức', goal: 'Phân biệt dữ kiện, bối cảnh và điều chưa xác minh', body: 'Phân tích nội dung tin sau bằng tiếng Việt. Tách rõ: dữ kiện được nêu, bối cảnh, tác động thực tế và điểm chưa thể xác minh. Nêu nguồn khi có trong văn bản; không suy đoán.\n\n{{text}}', variables: ['text'], tags: ['tin tức', 'phân tích'] },
+      translate: { title: 'Dịch tự nhiên', goal: 'Dịch đúng ý và giữ giọng văn phù hợp', body: 'Dịch nội dung dưới đây sang {{language}}. Giữ nguyên tên riêng, số liệu và cấu trúc cần thiết; nếu có cụm mơ hồ, ghi chú ngắn thay vì tự đoán.\n\n{{text}}', variables: ['text', 'language'], tags: ['dịch'] },
+      compare: { title: 'So sánh lựa chọn', goal: 'Đối chiếu ưu điểm, hạn chế và trường hợp sử dụng', body: 'So sánh các lựa chọn sau theo mục tiêu, điểm mạnh, hạn chế, chi phí/công sức nếu có dữ liệu và trường hợp phù hợp. Không tự tạo số liệu; kết thúc bằng đề xuất có điều kiện.\n\n{{options}}', variables: ['options'], tags: ['so sánh', 'ra quyết định'] },
+      code: { title: 'Rà soát mã nguồn', goal: 'Tìm lỗi và đề xuất cách sửa có căn cứ', body: 'Rà soát đoạn mã sau theo thứ tự ưu tiên: lỗi gây sai kết quả, bảo mật, hiệu năng và khả năng bảo trì. Với mỗi vấn đề, nêu vị trí, tác động và cách sửa. Không báo lỗi giả định nếu chưa có bằng chứng.\n\nMục tiêu: {{goal}}\n\n{{code}}', variables: ['goal', 'code'], tags: ['lập trình', 'review'] },
+    };
     const f = {
       title: h('input', { class: 'hub-input', maxlength: 120, value: p?.title || '', 'aria-label': 'Tiêu đề prompt' }),
       goal: h('input', { class: 'hub-input', maxlength: 300, value: p?.goal || '', placeholder: 'Mục tiêu, ví dụ: tóm tắt bài báo', 'aria-label': 'Mục tiêu' }),
@@ -171,6 +178,15 @@
       rating: h('select', { class: 'hub-input hub-small', 'aria-label': 'Đánh giá prompt' },
         h('option', { value: '', text: 'Chưa đánh giá' }), [1, 2, 3, 4, 5].map(n => h('option', { value: n, text: '★'.repeat(n), selected: p?.rating === n }))),
     };
+    const templatePicker = !p ? h('select', { class: 'hub-input', 'aria-label': 'Chọn mẫu prompt', onchange: e => {
+      const template = promptTemplates[e.target.value];
+      if (!template) return;
+      f.title.value = template.title; f.goal.value = template.goal; f.body.value = template.body;
+      f.variables.value = template.variables.join(', '); f.tags.value = template.tags.join(', ');
+    } }, h('option', { value: '', text: 'Chọn mẫu có sẵn…' }),
+      h('option', { value: 'summary', text: 'Tóm tắt bài viết' }), h('option', { value: 'news', text: 'Phân tích tin tức' }),
+      h('option', { value: 'translate', text: 'Dịch tự nhiên' }), h('option', { value: 'compare', text: 'So sánh lựa chọn' }),
+      h('option', { value: 'code', text: 'Rà soát mã nguồn' })) : null;
     const msg = h('div', { role: 'status' });
     const submit = async e => {
       e.preventDefault();
@@ -183,6 +199,7 @@
       } catch (err) { toast(msg, err.message, true); }
     };
     return h('form', { class: 'hub-form', onsubmit: submit },
+      templatePicker ? h('label', { class: 'hub-field' }, 'Bắt đầu từ mẫu', templatePicker) : null,
       h('label', { class: 'hub-field' }, 'Tiêu đề', f.title), h('label', { class: 'hub-field' }, 'Mục tiêu', f.goal),
       h('label', { class: 'hub-field' }, 'Nội dung (dùng {{tên_biến}} cho biến đầu vào)', f.body),
       h('div', { class: 'hub-grid2' }, h('label', { class: 'hub-field' }, 'Biến đầu vào (phân tách bằng dấu phẩy)', f.variables), h('label', { class: 'hub-field' }, 'Model tương thích', f.models)),
@@ -307,12 +324,38 @@
     const wName = h('input', { class: 'hub-input', maxlength: 60, value: s.weather.name, 'aria-label': 'Tên địa điểm thời tiết' });
     const wLat = h('input', { class: 'hub-input', type: 'number', step: 'any', min: -90, max: 90, value: s.weather.latitude, 'aria-label': 'Vĩ độ' });
     const wLon = h('input', { class: 'hub-input', type: 'number', step: 'any', min: -180, max: 180, value: s.weather.longitude, 'aria-label': 'Kinh độ' });
-    const wTz = h('input', { class: 'hub-input', value: s.weather.timezone, 'aria-label': 'Múi giờ thời tiết' });
+    const zoneOptions = ['Asia/Ho_Chi_Minh', 'Asia/Bangkok', 'Asia/Tokyo', 'Asia/Singapore', 'UTC'];
+    const zoneSelect = (value, label) => h('select', { class: 'hub-input', 'aria-label': label },
+      [...new Set([value, ...zoneOptions])].map(zone => h('option', { value: zone, text: zone, selected: zone === value })));
+    const wTz = zoneSelect(s.weather.timezone, 'Múi giờ thời tiết');
+    const places = [
+      ['Hà Nội', 21.0285, 105.8542], ['TP. Hồ Chí Minh', 10.8231, 106.6297], ['Đà Nẵng', 16.0544, 108.2022],
+      ['Hải Phòng', 20.8449, 106.6881], ['Cần Thơ', 10.0452, 105.7469], ['Huế', 16.4637, 107.5909],
+      ['Nha Trang', 12.2388, 109.1967], ['Đà Lạt', 11.9404, 108.4583], ['Tùy chỉnh vị trí…', null, null],
+    ];
+    const currentPlace = places.find(([name, lat, lon]) => name !== 'Tùy chỉnh vị trí…' && name === s.weather.name && Math.abs(lat - Number(s.weather.latitude)) < 0.02 && Math.abs(lon - Number(s.weather.longitude)) < 0.02);
+    const placeSelect = h('select', { class: 'hub-input', 'aria-label': 'Chọn thành phố thời tiết', onchange: e => {
+      const place = places.find(([name]) => name === e.target.value);
+      const custom = !place || place[1] == null;
+      customFields.hidden = !custom;
+      if (!custom) { wName.value = place[0]; wLat.value = place[1]; wLon.value = place[2]; wTz.value = 'Asia/Ho_Chi_Minh'; }
+    } },
+      ...places.map(([name]) => h('option', { value: name, text: name, selected: name === (currentPlace?.[0] || 'Tùy chỉnh vị trí…') })));
+    const customFields = h('div', { class: 'hub-grid2', hidden: !!currentPlace },
+      h('label', { class: 'hub-field' }, 'Tên địa điểm', wName), h('label', { class: 'hub-field' }, 'Vĩ độ', wLat), h('label', { class: 'hub-field' }, 'Kinh độ', wLon));
     const en = h('input', { type: 'checkbox', checked: s.schedule.enabled });
     const aiAuto = h('input', { type: 'checkbox', checked: s.schedule.ai_enabled !== false });
-    const time = h('input', { class: 'hub-input', type: 'time', value: s.schedule.time, 'aria-label': 'Giờ chạy' });
-    const tz = h('input', { class: 'hub-input', value: s.schedule.timezone, 'aria-label': 'Múi giờ' });
-    const topics = h('input', { class: 'hub-input', value: s.github.topics.join(', '), 'aria-label': 'Topic GitHub' });
+    const timePresets = ['06:00', '07:00', '08:00', '09:00', '12:00', '18:00', '20:00', '21:00'];
+    const customTime = h('input', { class: 'hub-input', type: 'time', value: s.schedule.time, 'aria-label': 'Giờ chạy tùy chỉnh' });
+    const time = h('select', { class: 'hub-input', 'aria-label': 'Chọn giờ chạy', onchange: () => { customTime.hidden = time.value !== 'custom'; } },
+      [...timePresets].sort().map(t => h('option', { value: t, text: t, selected: t === s.schedule.time })),
+      h('option', { value: 'custom', text: 'Giờ khác…', selected: !timePresets.includes(s.schedule.time) }));
+    customTime.hidden = time.value !== 'custom';
+    const tz = zoneSelect(s.schedule.timezone, 'Múi giờ lịch chạy');
+    const commonTopics = ['ai-agents', 'llm', 'mcp', 'agent-skills', 'rag', 'local-llm', 'context-engineering', 'generative-ai', 'machine-learning'];
+    const topicValues = [...new Set([...commonTopics, ...s.github.topics])];
+    const topicChecks = topicValues.map(topic => [topic, h('input', { type: 'checkbox', checked: s.github.topics.includes(topic), 'aria-label': topic })]);
+    const topics = h('div', { class: 'hub-grid2' }, topicChecks.map(([topic, checkbox]) => h('label', { class: 'hub-check' }, checkbox, ' ', topic)));
     const perTopic = h('input', { class: 'hub-input hub-small', type: 'number', min: 1, max: 100, value: s.github.per_topic_limit });
     const releases = h('input', { class: 'hub-input hub-small', type: 'number', min: 0, max: 100, value: s.github.release_checks });
     const refresh = h('input', { class: 'hub-input hub-small', type: 'number', min: 0, max: 200, value: s.github.refresh_limit });
@@ -421,9 +464,9 @@
       h('button', { class: 'hub-btn primary', type: 'submit', text: 'Kết nối AI' }), aiMsg);
     const settingsForm = h('form', { class: 'hub-form', onsubmit: async e => {
       e.preventDefault();
-      const payload = { schedule: { enabled: en.checked, time: time.value, timezone: tz.value.trim(), ai_enabled: aiAuto.checked },
+      const payload = { schedule: { enabled: en.checked, time: time.value === 'custom' ? customTime.value : time.value, timezone: tz.value, ai_enabled: aiAuto.checked },
         weather: { name: wName.value.trim(), latitude: Number(wLat.value), longitude: Number(wLon.value), timezone: wTz.value.trim() },
-        github: { topics: list(topics.value), per_topic_limit: Number(perTopic.value), release_checks: Number(releases.value), refresh_limit: Number(refresh.value) },
+        github: { topics: topicChecks.filter(([, checkbox]) => checkbox.checked).map(([topic]) => topic), per_topic_limit: Number(perTopic.value), release_checks: Number(releases.value), refresh_limit: Number(refresh.value) },
         max_requests_per_run: Number(maxReq.value), backup: { enabled: bEnabled.checked, keep: Number(bKeep.value) } };
       try { await api('PUT', '/settings', payload); toast(setMsg, 'Đã lưu cài đặt. Lịch mới áp dụng ngay.'); renderSources(); }
       catch (err) { toast(setMsg, err.message, true); }
@@ -431,18 +474,17 @@
       h('h4', { text: 'Lịch chạy tự động' }),
       h('label', { class: 'hub-check' }, en, ' Bật chạy mỗi ngày'),
       h('label', { class: 'hub-check' }, aiAuto, ` AI tự xếp hạng tài nguyên mới/cập nhật bằng model đang chọn (${aiStatus.model || 'Auto'})`),
-      h('div', { class: 'hub-grid2' }, h('label', { class: 'hub-field' }, 'Giờ chạy', time), h('label', { class: 'hub-field' }, 'Múi giờ (ví dụ Asia/Ho_Chi_Minh)', tz)),
+      h('div', { class: 'hub-grid2' }, h('label', { class: 'hub-field' }, 'Giờ chạy', time, customTime), h('label', { class: 'hub-field' }, 'Múi giờ', tz)),
       h('h4', { text: 'Sao lưu tự động' }),
       h('label', { class: 'hub-check' }, bEnabled, ' Tự sao lưu sau mỗi lần đồng bộ hằng ngày'),
       h('label', { class: 'hub-field' }, 'Số bản sao lưu giữ lại (1–60)', bKeep),
       h('h4', { text: 'Thời tiết (Open-Meteo, không cần key)' }),
       h('div', { class: 'hub-grid2' },
-        h('label', { class: 'hub-field' }, 'Tên địa điểm', wName),
-        h('label', { class: 'hub-field' }, 'Múi giờ', wTz),
-        h('label', { class: 'hub-field' }, 'Vĩ độ', wLat),
-        h('label', { class: 'hub-field' }, 'Kinh độ', wLon)),
+        h('label', { class: 'hub-field' }, 'Thành phố', placeSelect),
+        h('label', { class: 'hub-field' }, 'Múi giờ', wTz)),
+      customFields,
       h('h4', { text: 'Nguồn GitHub theo topic' }),
-      h('label', { class: 'hub-field' }, 'Topic (phân tách bằng dấu phẩy, chữ thường)', topics),
+      h('fieldset', { class: 'hub-field' }, h('legend', { text: 'Chọn topic GitHub muốn theo dõi' }), topics),
       h('div', { class: 'hub-grid2' },
         h('label', { class: 'hub-field' }, 'Số repo mỗi topic', perTopic),
         h('label', { class: 'hub-field' }, 'Số repo kiểm tra release', releases),
@@ -552,20 +594,30 @@
       placeholder: 'Tìm trong tài nguyên, memory, prompt và ghi chú…', 'aria-label': 'Tìm kiếm chung' });
     const out = h('div', { class: 'hub-list', 'aria-live': 'polite' });
     let evidence = [];
-    const askInput = h('input', { class: 'hub-input', maxlength: 500, placeholder: 'Hỏi về kết quả, ví dụ: mục nào phù hợp người mới?', 'aria-label': 'Câu hỏi cho AI' });
+    const askQuestion = h('select', { class: 'hub-input', 'aria-label': 'Chọn câu hỏi cho AI', onchange: () => {
+      askBtn.disabled = !evidence.length || !askQuestion.value;
+      askOut.replaceChildren();
+    } },
+      h('option', { value: '', text: 'Chọn câu hỏi có sẵn…' }),
+      h('option', { value: 'Tóm tắt ngắn gọn các kết quả tìm kiếm và nhóm chúng theo chủ đề.', text: 'Tóm tắt các kết quả' }),
+      h('option', { value: 'Trong các kết quả này, mục nào phù hợp nhất cho người mới bắt đầu? Nêu lý do và nguồn.', text: 'Mục nào phù hợp cho người mới?' }),
+      h('option', { value: 'So sánh những lựa chọn nổi bật trong kết quả theo điểm mạnh, điểm yếu và mục đích sử dụng.', text: 'So sánh các lựa chọn nổi bật' }),
+      h('option', { value: 'Dựa trên mô tả và nguồn, tôi nên thử mục nào trước? Giải thích ngắn gọn.', text: 'Nên thử mục nào trước?' }),
+      h('option', { value: 'Các kết quả có điểm chung nào, và khác nhau ở những điểm chính nào?', text: 'Điểm chung và khác biệt' }),
+      h('option', { value: 'Trong các kết quả, mục nào có nguồn hoặc bằng chứng đáng tin cậy nhất? Nêu căn cứ.', text: 'Nguồn nào đáng tin cậy nhất?' }));
     const askOut = h('div', { class: 'hub-ai-answer', 'aria-live': 'polite' });
     const askBtn = h('button', { class: 'hub-btn primary', type: 'submit', text: 'Hỏi AI', disabled: true });
     const askForm = h('form', { class: 'hub-row', onsubmit: async e => {
       e.preventDefault();
-      if (!evidence.length || !askInput.value.trim()) return;
+      if (!evidence.length || !askQuestion.value) return;
       askBtn.disabled = true; askOut.replaceChildren(h('p', { class: 'ov-muted', text: 'AI đang đọc các kết quả liên quan…' }));
       try {
-        const answer = await api('POST', '/ai/ask-library', { question: askInput.value.trim(), items: evidence });
+        const answer = await api('POST', '/ai/ask-library', { question: askQuestion.value, items: evidence });
         askOut.replaceChildren(h('p', { text: answer.answer }), answer.sources?.length
           ? h('small', { class: 'ov-muted', text: 'Căn cứ: ' + answer.sources.map(id => evidence.find(item => item.id === id)?.title || id).join(' · ') }) : null);
       } catch (err) { askOut.replaceChildren(h('p', { class: 'hub-error', role: 'alert', text: err.message })); }
-      finally { askBtn.disabled = !evidence.length; }
-    } }, askInput, askBtn);
+      finally { askBtn.disabled = !evidence.length || !askQuestion.value; }
+    } }, askQuestion, askBtn);
     const run = async () => {
       state.searchQ = input.value.trim();
       if (state.searchQ.length < 2) { evidence = []; askBtn.disabled = true; out.replaceChildren(h('p', { class: 'ov-muted', text: 'Nhập ít nhất 2 ký tự.' })); return; }
@@ -578,7 +630,7 @@
           ...results.notes.map(x => ({ ...x, type: 'note', title: x.name, id: 'note:' + x.resource_id }))
         ];
         evidence = candidates.slice(0, 20).map(x => ({ id: x.id, type: x.type, title: x.title || x.name, snippet: x.snippet || x.description || '' }));
-        askBtn.disabled = !evidence.length;
+        askBtn.disabled = !evidence.length || !askQuestion.value;
         if (candidates.length) {
           try {
             const ranked = await api('POST', '/ai/rank-search', { query: state.searchQ, items: candidates });
