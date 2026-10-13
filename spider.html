@@ -158,7 +158,7 @@ header .sub{margin:3px 0 0;max-width:480px}
       <div class="card" id="c-status"><span>TRẠNG THÁI</span><b id="latest-status">—</b><small id="latest-attempts">Lượt thử: —</small></div>
       <div class="card" id="c-latency"><span>ĐỘ TRỄ</span><b id="latest-latency">—</b><small>Thời gian hoàn tất request mới nhất</small></div>
       <div class="card" id="c-tokens"><span>TOKEN VÀO / RA</span><b id="latest-tokens">—</b><small id="latest-token-detail">Tổng token của request mới nhất</small></div>
-      <div class="card" id="c-savings"><span>CHI PHÍ ƯỚC TÍNH ĐÃ TIẾT KIỆM</span><b id="latest-savings">—</b><small id="latest-savings-detail">Chỉ tính request thành công · khoảng đã chọn</small></div>
+      <div class="card" id="c-savings"><span>TIẾT KIỆM THEO GIÁ TỪNG MODEL</span><b id="latest-savings">—</b><small id="latest-savings-detail">Chỉ tính model có đủ giá token · khoảng đã chọn</small></div>
     </div>
   </div>
 
@@ -474,7 +474,7 @@ function renderSnapshot(data) {
   $('latest-savings').textContent = savings == null ? 'Chưa có giá' : new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(savings);
   $('latest-savings-detail').textContent = savings == null
     ? 'Cơ sở dữ liệu FreeLLMAPI chưa có bảng giá model'
-    : `Quy đổi token thành công sang giá API trả phí · ${rangeLabel}`;
+    : `${asNum(data.pricedSuccessRequests)} request thành công có giá model; bỏ qua ${asNum(data.unpricedSuccessRequests)} request thiếu giá · ${rangeLabel}`;
   renderLatestRequest((data.recentCalls || [])[0]);
   const stats = $('live-stats'); stats.replaceChildren(
     stat('Tổng request', asNum(data.requests)),
@@ -483,7 +483,7 @@ function renderSnapshot(data) {
     stat('Lượt thử ở provider bị lỗi', asNum(data.failedAttempts), 'fail'),
     stat('Token đầu vào', asNum(data.inputTokens)),
     stat('Token đầu ra', asNum(data.outputTokens)),
-    stat('Chi phí ước tính đã tiết kiệm', savings == null ? 'Chưa có giá' : new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(savings), 'ok'),
+    stat('Tiết kiệm theo giá từng model', savings == null ? 'Chưa có bảng giá' : new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(savings), 'ok'),
     stat('Độ trễ trung bình', asMs(data.avgLatencyMs)),
     stat('Độ trễ P95', asMs(data.p95LatencyMs)),
     stat('Thời gian tới token đầu (TTFT)', asMs(data.avgTtfbMs)),
