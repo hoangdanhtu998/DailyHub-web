@@ -31,8 +31,6 @@ DB_PATH = Path(os.environ.get("FREELLMAPI_DB", Path(os.environ.get("APPDATA", ""
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("DAILYHUB_PORT", "8766"))
 RANGES = {"24h": 1, "7d": 7, "30d": 30, "90d": 90}
-FALLBACK_INPUT_PER_M = 0.20
-FALLBACK_OUTPUT_PER_M = 0.80
 
 
 def db_connect() -> sqlite3.Connection:
@@ -73,26 +71,35 @@ def snapshot(range_name: str) -> dict:
             (since,),
         ).fetchone()
 
-        # Mirror FreeLLMAPI's Analytics "estimated savings" calculation:
-        # price successful requests at their paid-equivalent model rates,
-        # falling back to the app's modest default when a model has no price.
+        # Price each successful request only when this exact model row has
+        # both paid-equivalent token rates. Never substitute generic prices.
         model_columns = {row[1] for row in con.execute("PRAGMA table_info(models)")}
         if {"paid_input_per_m", "paid_output_per_m"}.issubset(model_columns):
             savings_row = con.execute(
-                """SELECT COALESCE(SUM(
-                           CASE WHEN r.status='success' THEN
-                             COALESCE(r.input_tokens,0) * COALESCE(m.paid_input_per_m, ?) / 1000000.0 +
-                             COALESCE(r.output_tokens,0) * COALESCE(m.paid_output_per_m, ?) / 1000000.0
-                           ELSE 0 END
-                         ),0) AS estimated_cost_savings
+                """SELECT
+                         COALESCE(SUM(CASE WHEN r.status='success'
+                               AND m.paid_input_per_m IS NOT NULL
+                               AND m.paid_output_per_m IS NOT NULL THEN
+                             COALESCE(r.input_tokens,0) * m.paid_input_per_m / 1000000.0 +
+                             COALESCE(r.output_tokens,0) * m.paid_output_per_m / 1000000.0
+                           ELSE 0 END),0) AS estimated_cost_savings,
+                         SUM(CASE WHEN r.status='success'
+                               AND m.paid_input_per_m IS NOT NULL
+                               AND m.paid_output_per_m IS NOT NULL THEN 1 ELSE 0 END) AS priced_success_requests,
+                         SUM(CASE WHEN r.status='success'
+                               AND (m.paid_input_per_m IS NULL OR m.paid_output_per_m IS NULL) THEN 1 ELSE 0 END) AS unpriced_success_requests
                    FROM requests r LEFT JOIN models m ON m.id=r.model_db_id
                    WHERE r.created_at >= ?""",
-                (FALLBACK_INPUT_PER_M, FALLBACK_OUTPUT_PER_M, since),
+                (since,),
             ).fetchone()
             estimated_cost_savings = round(savings_row["estimated_cost_savings"] or 0, 2)
+            priced_success_requests = savings_row["priced_success_requests"] or 0
+            unpriced_success_requests = savings_row["unpriced_success_requests"] or 0
         else:
             # Older FreeLLMAPI databases may not have the pricing migration.
             estimated_cost_savings = None
+            priced_success_requests = None
+            unpriced_success_requests = None
 
         latency_values = [r[0] for r in con.execute(
             "SELECT latency_ms FROM requests WHERE created_at >= ? AND latency_ms IS NOT NULL",
@@ -206,6 +213,8 @@ def snapshot(range_name: str) -> dict:
         "p95LatencyMs": percentile(latency_values, .95),
         "avgTtfbMs": round(summary["avg_ttfb_ms"] or 0),
         "estimatedCostSavings": estimated_cost_savings,
+        "pricedSuccessRequests": priced_success_requests,
+        "unpricedSuccessRequests": unpriced_success_requests,
         "byProvider": providers,
         "byModel": models,
         "recentCalls": [dict(r) for r in recent_rows],
